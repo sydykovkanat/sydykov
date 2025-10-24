@@ -1,0 +1,73 @@
+// Prisma schema for Telegram Bot
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Пользователи Telegram
+model User {
+  id            String         @id @default(cuid())
+  telegramId    BigInt         @unique
+  username      String?
+  firstName     String?
+  lastName      String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+
+  @@index([telegramId])
+  @@map("users")
+}
+
+// Диалоги с пользователями
+model Conversation {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  summary       String?   @db.Text // Суммаризированный контекст старых сообщений
+  lastMessageAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  messages      Message[]
+
+  @@index([userId])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+// Сообщения в диалогах
+model Message {
+  id                String       @id @default(cuid())
+  conversationId    String
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role              String       // 'user' или 'assistant'
+  content           String       @db.Text
+  imageUrls         String[]     @default([]) // URL картинок в сообщении
+  telegramMessageId Int?         // ID сообщения в Telegram для user messages
+  createdAt         DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Очередь непрочитанных сообщений для debounce логики
+model PendingMessage {
+  id                String   @id @default(cuid())
+  userId            String   // ID пользователя в нашей БД
+  telegramId        BigInt   // Telegram ID пользователя
+  content           String   @db.Text
+  imageUrls         String[] @default([]) // URL картинок в сообщении
+  telegramMessageId Int      // ID сообщения в Telegram
+  scheduledFor      DateTime // Когда нужно обработать (now + 10 секунд)
+  processed         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  @@index([userId, processed])
+  @@index([scheduledFor, processed])
+  @@map("pending_messages")
+}
