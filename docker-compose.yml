@@ -1,4 +1,29 @@
+version: '3.9'
+
 services:
+  backend:
+    build: ./backend
+    container_name: sydykov_backend
+    ports:
+      - '3000:3000'
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sydykov_network
+    environment:
+      NODE_ENV: production
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USER: sydykov_user
+      DATABASE_PASSWORD: sydykov_password
+      DATABASE_NAME: sydykov_bot
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
   postgres:
     image: postgres:15-alpine
     container_name: sydykov_postgres
