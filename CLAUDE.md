@@ -83,6 +83,7 @@ yarn docker:logs          # View container logs
 **Debounce Logic**: The 10-second delay allows users to send multiple messages (e.g., corrections, additions, photos) before the bot responds once with full context.
 
 **Conversation Context**: Each conversation has:
+
 - `summary` field: Summarized old messages (when conversation gets long)
 - Recent messages: Last N messages (default 20, via `CONTEXT_MESSAGES_LIMIT`)
 - Both are combined when calling OpenAI to maintain context while staying within token limits
@@ -92,6 +93,7 @@ yarn docker:logs          # View container logs
 **Read Receipts & Typing**: The assistant marks messages as read after a random delay of 3-5 seconds (simulating human reading time) and shows "typing..." status while generating a response. This makes interactions feel natural and human-like.
 
 **Rate Limiting**: Protection against message spam with Redis-based rate limiting:
+
 - Maximum 50 messages per hour per user (configurable via `RATE_LIMIT_MAX_MESSAGES_PER_HOUR`)
 - When limit is exceeded:
   - First time: sends warning message (configurable via `RATE_LIMIT_WARNING_MESSAGE`)
@@ -100,6 +102,7 @@ yarn docker:logs          # View container logs
 - Implementation: [rate-limit.service.ts](src/rate-limit/rate-limit.service.ts)
 
 **Smart Reactions**: GPT can respond with emoji reactions instead of text when appropriate:
+
 - Uses OpenAI structured output to decide: reaction or text
 - Available reactions: 👍 ❤️ 🔥 🎉 👏 😁
 - Examples: "окей" → 👍, "спасибо" → ❤️, "ахаха" → 😁
@@ -122,15 +125,18 @@ yarn docker:logs          # View container logs
 Schema location: [prisma/schema.prisma](prisma/schema.prisma)
 
 **User**: Telegram users
+
 - `telegramId` (BigInt, unique): Telegram user ID
 - `username`, `firstName`, `lastName`: Profile info
 
 **Conversation**: Dialogs with users
+
 - `userId`: Foreign key to User
 - `summary`: Summarized context of old messages (for long conversations)
 - `lastMessageAt`: For sorting/cleanup
 
 **Message**: Chat history
+
 - `conversationId`: Foreign key to Conversation
 - `role`: 'user' or 'assistant'
 - `content`: Message text
@@ -138,6 +144,7 @@ Schema location: [prisma/schema.prisma](prisma/schema.prisma)
 - `telegramMessageId`: Original Telegram message ID (for user messages)
 
 **PendingMessage**: Temporary queue for debounce logic
+
 - `userId`, `telegramId`: User identifiers
 - `content`, `imageUrls`: Message data
 - `scheduledFor`: When to process (createdAt + delay)
@@ -149,12 +156,14 @@ Schema location: [prisma/schema.prisma](prisma/schema.prisma)
 Required environment variables (see `.env.example`):
 
 ### Telegram MTProto Configuration
+
 - `TELEGRAM_API_ID`: Get from https://my.telegram.org/apps
 - `TELEGRAM_API_HASH`: Get from https://my.telegram.org/apps
 - `TELEGRAM_SESSION_STRING`: Generate using `yarn auth` script
 - `TELEGRAM_PHONE_NUMBER`: (Optional) Phone number for initial auth
 
 ### Other Configuration
+
 - `OPENAI_API_KEY`: OpenAI API key
 - `OPENAI_MODEL`: Model to use (default: gpt-4o for vision support)
 - `DATABASE_URL`: PostgreSQL connection string

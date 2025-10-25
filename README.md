@@ -94,6 +94,7 @@ yarn auth
 ```
 
 Скопируйте полученный session string в `.env`:
+
 ```
 TELEGRAM_SESSION_STRING="ваш_длинный_session_string_здесь"
 ```
@@ -129,12 +130,14 @@ npx prisma migrate deploy
 См. `.env.example` для полного списка переменных:
 
 ### Telegram MTProto
+
 - `TELEGRAM_API_ID` - App api_id с https://my.telegram.org/apps
 - `TELEGRAM_API_HASH` - App api_hash с https://my.telegram.org/apps
 - `TELEGRAM_SESSION_STRING` - Сессия (получить через `yarn auth`)
 - `TELEGRAM_PHONE_NUMBER` - (Опционально) Номер телефона
 
 ### Другие настройки
+
 - `OPENAI_API_KEY` - ключ API OpenAI
 - `DATABASE_URL` - строка подключения к PostgreSQL
 - `REDIS_HOST`, `REDIS_PORT` - настройки Redis
@@ -224,6 +227,7 @@ yarn auth
 ### Session истек
 
 Если видите ошибки типа "Session expired":
+
 1. Запустите `yarn auth` заново
 2. Обновите `TELEGRAM_SESSION_STRING` в .env
 3. Перезапустите приложение

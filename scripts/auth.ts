@@ -1,5 +1,4 @@
 #!/usr/bin/env ts-node
-
 /**
  * Script to authenticate with Telegram MTProto and generate session string
  *
@@ -10,12 +9,11 @@
  * 4. Enter phone number and code from Telegram
  * 5. Copy the session string to .env as TELEGRAM_SESSION_STRING
  */
-
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import * as readline from 'readline';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import * as readline from 'readline';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
 
 // Load .env file
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -39,7 +37,9 @@ async function main() {
   const apiHash = process.env.TELEGRAM_API_HASH || '';
 
   if (!apiId || !apiHash) {
-    console.error('ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH must be set in .env file');
+    console.error(
+      'ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH must be set in .env file',
+    );
     console.error('Get them from https://my.telegram.org/apps');
     process.exit(1);
   }
@@ -56,7 +56,9 @@ async function main() {
 
   await client.start({
     phoneNumber: async () => {
-      const phone = await question('Enter your phone number (with country code, e.g., +1234567890): ');
+      const phone = await question(
+        'Enter your phone number (with country code, e.g., +1234567890): ',
+      );
       return phone.trim();
     },
     password: async () => {
@@ -64,7 +66,9 @@ async function main() {
       return password.trim();
     },
     phoneCode: async () => {
-      const code = await question('Enter the code you received from Telegram: ');
+      const code = await question(
+        'Enter the code you received from Telegram: ',
+      );
       return code.trim();
     },
     onError: (err) => {
@@ -79,7 +83,7 @@ async function main() {
   console.log('Logged in as:');
   console.log(`  Name: ${me.firstName} ${me.lastName || ''}`);
   console.log(`  Username: @${(me as any).username || 'no username'}`);
-  console.log(`  ID: ${me.id}`);
+  console.log(`  ID: ${String(me.id)}`);
   console.log();
 
   // Get and display session string

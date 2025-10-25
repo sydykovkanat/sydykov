@@ -32,6 +32,7 @@ nano .env
 ```
 
 Update these values in `.env`:
+
 ```env
 TELEGRAM_API_ID=12345678                    # Your api_id from step 1
 TELEGRAM_API_HASH=abcdef1234567890abcdef   # Your api_hash from step 1
@@ -64,12 +65,14 @@ yarn auth
 ```
 
 Follow the prompts:
+
 1. Enter your phone number (international format): `+1234567890`
 2. Enter the code you receive in Telegram
 3. If you have 2FA enabled, enter your password
 4. Copy the **SESSION_STRING** that appears
 
 Example output:
+
 ```
 === SESSION STRING ===
 Copy this to your .env file as TELEGRAM_SESSION_STRING:
@@ -82,11 +85,13 @@ Copy this to your .env file as TELEGRAM_SESSION_STRING:
 ### 6. Add Session String to .env
 
 Open `.env` and add:
+
 ```env
 TELEGRAM_SESSION_STRING="1AgAOMTQ5LjE1NC4xNjcuNTEBu...paste_your_session_string_here..."
 ```
 
 **⚠️ SECURITY WARNING**:
+
 - This session string gives FULL ACCESS to your Telegram account
 - Never commit it to git (it's already in .gitignore)
 - Keep it secure like a password
@@ -107,6 +112,7 @@ yarn start:prod
 ### 8. Verify It's Working
 
 You should see in the logs:
+
 ```
 [TelegramService] Telegram MTProto client connected successfully
 [TelegramService] Logged in as: Your Name (@your_username)
@@ -117,21 +123,25 @@ Now send yourself a message in Telegram and the bot should respond!
 ## Common Issues
 
 ### "Failed to connect Telegram MTProto client"
+
 - Check your `TELEGRAM_API_ID` and `TELEGRAM_API_HASH`
 - Make sure they're numbers/strings, not empty
 
 ### "Session expired" errors
+
 - Run `yarn auth` again to generate a new session string
 - Update `.env` with the new session string
 - Restart the application
 
 ### Bot doesn't respond
+
 - Check that Redis and PostgreSQL are running: `docker-compose ps`
 - Check logs for errors: `yarn start:dev`
 - Make sure you're sending messages to **private chats** only (not groups)
 - Wait 10 seconds (default debounce delay)
 
 ### Can't run `yarn auth`
+
 - Make sure `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are in `.env`
 - Try running: `ts-node scripts/auth.ts` directly
 
@@ -160,5 +170,6 @@ pm2 save
 ## Help
 
 For more details, see:
+
 - [README.md](./README.md) - Full documentation
 - [CLAUDE.md](./CLAUDE.md) - Architecture and implementation details
