@@ -1,11 +1,13 @@
-# Telegram Bot для личного аккаунта Каната Сыдыкова (@nur_ksydykov)
+# Telegram Personal Assistant для Каната Сыдыкова (@nur_ksydykov)
 
-Умный Telegram-бот, который обрабатывает личные сообщения, используя GPT-4o для естественного общения в стиле Каната. Бот накапливает сообщения в течение 10 секунд перед ответом, хранит контекст диалогов и автоматически суммаризирует историю.
+Умный Telegram-ассистент, работающий на **личном аккаунте** через MTProto, который обрабатывает личные сообщения используя GPT-4o для естественного общения. Ассистент накапливает сообщения в течение 10 секунд перед ответом, хранит контекст диалогов и автоматически суммаризирует историю.
+
+**⚠️ ВАЖНО**: Это НЕ обычный бот! Проект использует **MTProto** (личный аккаунт), а не Bot API. Работает как обычный пользователь Telegram.
 
 ## Технологический стек
 
 - **Backend**: NestJS + TypeScript
-- **Telegram API**: Telegraf.js
+- **Telegram API**: telegram (MTProto/GramJS)
 - **AI**: OpenAI (GPT-4o / GPT-4o-mini)
 - **Database**: PostgreSQL + Prisma ORM
 - **Queue**: BullMQ + Redis
@@ -57,10 +59,12 @@ yarn install
 cp .env.example .env
 
 # Отредактировать .env и добавить:
-# - TELEGRAM_BOT_TOKEN (от @BotFather)
+# - TELEGRAM_API_ID и TELEGRAM_API_HASH (получить на https://my.telegram.org/apps)
 # - OPENAI_API_KEY (от OpenAI)
 # - DATABASE_URL (если не используете docker-compose)
 ```
+
+**Важно**: Нужно зарегистрировать приложение на https://my.telegram.org/apps для получения API_ID и API_HASH
 
 ### 4. Запуск инфраструктуры
 
@@ -75,7 +79,28 @@ npx prisma migrate dev
 npx prisma generate
 ```
 
-### 5. Запуск приложения
+### 5. Авторизация в Telegram
+
+**⚠️ КРИТИЧЕСКИ ВАЖНЫЙ ШАГ**
+
+```bash
+# Запустить скрипт авторизации
+yarn auth
+
+# Следуйте инструкциям:
+# 1. Введите номер телефона (в формате +1234567890)
+# 2. Введите код из Telegram
+# 3. Скопируйте полученный SESSION_STRING в .env
+```
+
+Скопируйте полученный session string в `.env`:
+```
+TELEGRAM_SESSION_STRING="ваш_длинный_session_string_здесь"
+```
+
+**⚠️ ВАЖНО**: Session string дает полный доступ к вашему аккаунту! Никогда не коммитьте его в git!
+
+### 6. Запуск приложения
 
 ```bash
 # Development mode с hot-reload
@@ -103,7 +128,13 @@ npx prisma migrate deploy
 
 См. `.env.example` для полного списка переменных:
 
-- `TELEGRAM_BOT_TOKEN` - токен бота от @BotFather
+### Telegram MTProto
+- `TELEGRAM_API_ID` - App api_id с https://my.telegram.org/apps
+- `TELEGRAM_API_HASH` - App api_hash с https://my.telegram.org/apps
+- `TELEGRAM_SESSION_STRING` - Сессия (получить через `yarn auth`)
+- `TELEGRAM_PHONE_NUMBER` - (Опционально) Номер телефона
+
+### Другие настройки
 - `OPENAI_API_KEY` - ключ API OpenAI
 - `DATABASE_URL` - строка подключения к PostgreSQL
 - `REDIS_HOST`, `REDIS_PORT` - настройки Redis
@@ -175,12 +206,27 @@ yarn build
 
 ## Troubleshooting
 
-### Бот не отвечает
+### Ассистент не отвечает
 
 1. Проверьте, что Redis и PostgreSQL запущены
 2. Проверьте логи: `pm2 logs` или консоль
-3. Убедитесь, что `TELEGRAM_BOT_TOKEN` корректный
-4. Проверьте, что пишете в **личные сообщения**, а не в группу
+3. Убедитесь, что `TELEGRAM_SESSION_STRING` добавлен в .env
+4. Проверьте, что вы авторизованы (должно быть сообщение "Logged in as: ...")
+5. Проверьте, что пишете в **личные сообщения**, а не в группу
+
+### Ошибки авторизации
+
+```bash
+# Удалите старый session string и авторизуйтесь заново
+yarn auth
+```
+
+### Session истек
+
+Если видите ошибки типа "Session expired":
+1. Запустите `yarn auth` заново
+2. Обновите `TELEGRAM_SESSION_STRING` в .env
+3. Перезапустите приложение
 
 ### Ошибки с БД
 

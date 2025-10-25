@@ -2,8 +2,10 @@ import { InjectQueue } from '@nestjs/bull';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bull';
-import { Context, Telegraf } from 'telegraf';
-import { Update } from 'telegraf/types';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
+import { NewMessage, NewMessageEvent } from 'telegram/events';
+import { Api } from 'telegram/tl';
 
 import { ConversationService } from '../conversation/conversation.service';
 import { MESSAGE_QUEUE } from '../queue/shared-queue.module';
@@ -11,7 +13,7 @@ import { MESSAGE_QUEUE } from '../queue/shared-queue.module';
 @Injectable()
 export class TelegramService implements OnModuleInit {
   private readonly logger = new Logger(TelegramService.name);
-  private bot: Telegraf<Context<Update>>;
+  private client: TelegramClient;
   private readonly messageDelaySeconds: number;
 
   constructor(
@@ -19,117 +21,236 @@ export class TelegramService implements OnModuleInit {
     private readonly conversationService: ConversationService,
     @InjectQueue(MESSAGE_QUEUE) private readonly messageQueue: Queue,
   ) {
-    const botToken = this.configService.get<string>('telegram.botToken');
+    const apiId = this.configService.get<number>('telegram.apiId');
+    const apiHash = this.configService.get<string>('telegram.apiHash');
+    const sessionString = this.configService.get<string>(
+      'telegram.sessionString',
+    );
+
     this.messageDelaySeconds = this.configService.get<number>(
       'messageProcessing.delaySeconds',
       10,
     );
 
-    this.bot = new Telegraf(botToken!);
+    // Инициализация MTProto клиента
+    const session = new StringSession(sessionString || '');
+    this.client = new TelegramClient(session, apiId!, apiHash!, {
+      connectionRetries: 5,
+    });
+
     this.setupHandlers();
   }
 
   async onModuleInit() {
     try {
-      await this.bot.launch();
-      this.logger.log('Telegram bot launched successfully');
+      await this.client.connect();
+      this.logger.log('Telegram MTProto client connected successfully');
+
+      // Получаем информацию о текущем пользователе
+      const me = await this.client.getMe();
+      this.logger.log(
+        `Logged in as: ${me.firstName} ${me.lastName || ''} (@${(me as any).username || 'no username'})`,
+      );
     } catch (error) {
-      this.logger.error('Failed to launch Telegram bot', error);
+      this.logger.error('Failed to connect Telegram MTProto client', error);
       throw error;
     }
   }
 
   private setupHandlers() {
-    // Обработчик сообщений (текст + фото)
-    this.bot.on('message', async (ctx) => {
-      try {
-        // ВАЖНО: Игнорируем все сообщения из групп и каналов
-        if (ctx.chat.type !== 'private') {
-          this.logger.debug(`Ignoring message from ${ctx.chat.type} chat`);
-          return;
-        }
+    // Обработчик входящих сообщений
+    this.client.addEventHandler(
+      async (event: NewMessageEvent) => {
+        try {
+          const message = event.message;
 
-        const telegramId = BigInt(ctx.from.id);
-        const username = ctx.from.username;
-        const firstName = ctx.from.first_name;
-        const lastName = ctx.from.last_name;
-        const messageId = ctx.message.message_id;
-
-        // Получаем текст (если есть) и фото (если есть)
-        let messageText = '';
-        const imageUrls: string[] = [];
-
-        if ('text' in ctx.message) {
-          messageText = ctx.message.text;
-        } else if ('caption' in ctx.message && ctx.message.caption) {
-          messageText = ctx.message.caption;
-        }
-
-        // Обрабатываем фото
-        if ('photo' in ctx.message && ctx.message.photo) {
-          // Берем фото с наибольшим разрешением (последнее в массиве)
-          const photo = ctx.message.photo[ctx.message.photo.length - 1];
-          try {
-            const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-            imageUrls.push(fileLink.href);
-            this.logger.debug(`Got photo URL: ${fileLink.href}`);
-          } catch (error) {
-            this.logger.error('Failed to get photo URL', error);
+          // Игнорируем исходящие сообщения (отправленные нами)
+          if (message.out) {
+            return;
           }
+
+          // Игнорируем сообщения не из приватных чатов
+          const peerId = message.peerId;
+          if (!peerId || !(peerId instanceof Api.PeerUser)) {
+            this.logger.debug(`Ignoring message from non-private chat`);
+            return;
+          }
+
+          // Получаем отправителя
+          const sender = await message.getSender();
+          if (!sender || !(sender instanceof Api.User)) {
+            this.logger.debug('Sender is not a user, ignoring');
+            return;
+          }
+
+          const telegramId = BigInt(sender.id.toString());
+          const username = (sender as any).username || undefined;
+          const firstName = sender.firstName || '';
+          const lastName = sender.lastName || undefined;
+          const messageId = message.id;
+
+          // Получаем текст сообщения
+          let messageText = message.text || '';
+
+          // Обрабатываем фото
+          const imageUrls: string[] = [];
+          if (message.media && message.media instanceof Api.MessageMediaPhoto) {
+            try {
+              // Скачиваем фото и получаем URL
+              // В продакшене лучше сохранять фото локально или в S3
+              // Пока просто логируем что фото есть
+              this.logger.debug('Message contains photo');
+              // TODO: Реализовать скачивание и хранение фото
+              // const buffer = await this.client.downloadMedia(message.media);
+            } catch (error) {
+              this.logger.error('Failed to process photo', error);
+            }
+          }
+
+          // Игнорируем сообщения без текста и без фото
+          if (!messageText && imageUrls.length === 0) {
+            this.logger.debug('Ignoring message without text and photos');
+            return;
+          }
+
+          this.logger.log(
+            `Received message from ${firstName} (${telegramId}): ${messageText.substring(0, 50)}... with ${imageUrls.length} photo(s)`,
+          );
+
+          // Находим или создаем пользователя
+          const user = await this.conversationService.findOrCreateUser(
+            telegramId,
+            username,
+            firstName,
+            lastName,
+          );
+
+          // Сохраняем сообщение как pending
+          await this.conversationService.savePendingMessage(
+            user.id,
+            telegramId,
+            messageText,
+            messageId,
+            this.messageDelaySeconds,
+            imageUrls,
+          );
+
+          // Добавляем задачу в очередь с задержкой
+          await this.messageQueue.add(
+            'process-message',
+            {
+              userId: user.id,
+              telegramId: Number(sender.id),
+            },
+            {
+              delay: this.messageDelaySeconds * 1000,
+              jobId: `${user.id}-${Date.now()}`,
+            },
+          );
+
+          this.logger.debug(
+            `Added message to queue with ${this.messageDelaySeconds}s delay`,
+          );
+
+          // Отмечаем сообщение как прочитанное с задержкой 3-5 секунд
+          // Запускаем асинхронно, не блокируя основной поток
+          this.markAsReadWithDelay(Number(sender.id), 3, 5).catch((err) => {
+            this.logger.error('Failed to mark as read with delay', err);
+          });
+        } catch (error) {
+          this.logger.error('Error handling message', error);
         }
-
-        // Игнорируем сообщения без текста и без фото
-        if (!messageText && imageUrls.length === 0) {
-          this.logger.debug('Ignoring message without text and photos');
-          return;
-        }
-
-        this.logger.log(
-          `Received message from ${firstName} (${telegramId}): ${messageText.substring(0, 50)}... with ${imageUrls.length} photo(s)`,
-        );
-
-        // Находим или создаем пользователя
-        const user = await this.conversationService.findOrCreateUser(
-          telegramId,
-          username,
-          firstName,
-          lastName,
-        );
-
-        // Сохраняем сообщение как pending
-        await this.conversationService.savePendingMessage(
-          user.id,
-          telegramId,
-          messageText,
-          messageId,
-          this.messageDelaySeconds,
-          imageUrls,
-        );
-
-        // Добавляем задачу в очередь с задержкой
-        await this.messageQueue.add(
-          'process-message',
-          {
-            userId: user.id,
-            telegramId: ctx.from.id,
-          },
-          {
-            delay: this.messageDelaySeconds * 1000,
-            jobId: `${user.id}-${Date.now()}`,
-          },
-        );
-
-        this.logger.debug(
-          `Added message to queue with ${this.messageDelaySeconds}s delay`,
-        );
-      } catch (error) {
-        this.logger.error('Error handling message', error);
-      }
-    });
+      },
+      new NewMessage({}),
+    );
 
     // Graceful shutdown
-    process.once('SIGINT', () => this.bot.stop('SIGINT'));
-    process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
+    const shutdown = async () => {
+      this.logger.log('Disconnecting Telegram client...');
+      await this.client.disconnect();
+      process.exit(0);
+    };
+
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  }
+
+  /**
+   * Устанавливает статус "печатает..." для пользователя
+   */
+  async setTyping(telegramId: number, isTyping: boolean = true): Promise<void> {
+    try {
+      if (isTyping) {
+        await this.client.invoke(
+          new Api.messages.SetTyping({
+            peer: telegramId,
+            action: new Api.SendMessageTypingAction(),
+          }),
+        );
+        this.logger.debug(`Set typing status for ${telegramId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to set typing status for ${telegramId}`, error);
+      // Не бросаем ошибку, это не критично
+    }
+  }
+
+  /**
+   * Отмечает сообщения как прочитанные с задержкой (имитация чтения человеком)
+   * @param telegramId - ID пользователя
+   * @param minDelay - минимальная задержка в секундах (по умолчанию 3)
+   * @param maxDelay - максимальная задержка в секундах (по умолчанию 5)
+   */
+  async markAsReadWithDelay(
+    telegramId: number,
+    minDelay: number = 3,
+    maxDelay: number = 5,
+  ): Promise<void> {
+    try {
+      // Случайная задержка между min и max секундами
+      const delaySeconds = Math.random() * (maxDelay - minDelay) + minDelay;
+      const delayMs = Math.floor(delaySeconds * 1000);
+
+      this.logger.debug(
+        `Waiting ${(delayMs / 1000).toFixed(2)}s before marking as read for ${telegramId}`,
+      );
+
+      // Ждем случайное время
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+      // Отмечаем как прочитанное
+      await this.client.invoke(
+        new Api.messages.ReadHistory({
+          peer: telegramId,
+          maxId: 0, // 0 означает "все сообщения"
+        }),
+      );
+      this.logger.debug(`Marked messages as read for ${telegramId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to mark messages as read for ${telegramId}`,
+        error,
+      );
+      // Не бросаем ошибку, это не критично
+    }
+  }
+
+  /**
+   * Отмечает сообщения как прочитанные (без задержки)
+   */
+  async markAsRead(telegramId: number): Promise<void> {
+    try {
+      await this.client.invoke(
+        new Api.messages.ReadHistory({
+          peer: telegramId,
+          maxId: 0, // 0 означает "все сообщения"
+        }),
+      );
+      this.logger.debug(`Marked messages as read for ${telegramId}`);
+    } catch (error) {
+      this.logger.error(`Failed to mark messages as read for ${telegramId}`, error);
+      // Не бросаем ошибку, это не критично
+    }
   }
 
   /**
@@ -137,7 +258,9 @@ export class TelegramService implements OnModuleInit {
    */
   async sendMessage(telegramId: number, text: string): Promise<void> {
     try {
-      await this.bot.telegram.sendMessage(telegramId, text);
+      await this.client.sendMessage(telegramId, {
+        message: text,
+      });
       this.logger.log(`Sent message to ${telegramId}`);
     } catch (error) {
       this.logger.error(`Failed to send message to ${telegramId}`, error);
@@ -146,9 +269,9 @@ export class TelegramService implements OnModuleInit {
   }
 
   /**
-   * Возвращает экземпляр бота (для дополнительной кастомизации если нужно)
+   * Возвращает экземпляр клиента (для дополнительной кастомизации если нужно)
    */
-  getBot(): Telegraf<Context<Update>> {
-    return this.bot;
+  getClient(): TelegramClient {
+    return this.client;
   }
 }

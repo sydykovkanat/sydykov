@@ -62,28 +62,31 @@ export class MessageProcessor {
       const contextMessages =
         await this.conversationService.getConversationContext(conversation.id);
 
-      // 5. Сформировать промпт для OpenAI и получить ответ
+      // 5. Показать статус "печатает..."
+      await this.telegramService.setTyping(telegramId, true);
+
+      // 6. Сформировать промпт для OpenAI и получить ответ
       this.logger.debug(`Sending ${contextMessages.length} messages to OpenAI`);
       const response =
         await this.openaiService.generateResponse(contextMessages);
 
-      // 6. Сохранить ответ в БД
+      // 7. Сохранить ответ в БД
       await this.conversationService.saveMessage(
         conversation.id,
         'assistant',
         response,
       );
 
-      // 7. Отправить ответ в Telegram
+      // 8. Отправить ответ в Telegram
       await this.telegramService.sendMessage(telegramId, response);
 
-      // 8. Пометить pending сообщения как обработанные
+      // 9. Пометить pending сообщения как обработанные
       const pendingMessageIds = pendingMessages.map((msg) => msg.id);
       await this.conversationService.markPendingMessagesAsProcessed(
         pendingMessageIds,
       );
 
-      // 9. Проверить, нужна ли суммаризация
+      // 10. Проверить, нужна ли суммаризация
       await this.conversationService.summarizeConversation(conversation.id);
 
       this.logger.log(`Successfully processed message job ${job.id}`);

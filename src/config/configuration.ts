@@ -30,14 +30,22 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   DATABASE_URL: string;
 
-  // Telegram
+  // Telegram MTProto
+  @IsInt()
+  @IsPositive()
+  TELEGRAM_API_ID: number;
+
   @IsString()
   @IsNotEmpty()
-  TELEGRAM_BOT_TOKEN: string;
+  TELEGRAM_API_HASH: string;
+
+  @IsString()
+  @IsNotEmpty()
+  TELEGRAM_SESSION_STRING: string;
 
   @IsString()
   @IsOptional()
-  TELEGRAM_USER_ID?: string;
+  TELEGRAM_PHONE_NUMBER?: string;
 
   // OpenAI
   @IsString()
@@ -125,8 +133,10 @@ export default () => ({
     url: process.env.DATABASE_URL,
   },
   telegram: {
-    botToken: process.env.TELEGRAM_BOT_TOKEN,
-    userId: process.env.TELEGRAM_USER_ID,
+    apiId: parseInt(process.env.TELEGRAM_API_ID || '0', 10),
+    apiHash: process.env.TELEGRAM_API_HASH,
+    sessionString: process.env.TELEGRAM_SESSION_STRING,
+    phoneNumber: process.env.TELEGRAM_PHONE_NUMBER,
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
