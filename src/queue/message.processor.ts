@@ -63,23 +63,81 @@ export class MessageProcessor {
       const contextMessages =
         await this.conversationService.getConversationContext(conversation.id);
 
-      // 5. Показать статус "печатает..."
-      await this.telegramService.setTyping(telegramId, true);
-
-      // 6. Сформировать промпт для OpenAI и получить ответ
+      // 5. Сформировать промпт для OpenAI и получить ответ
       this.logger.debug(`Sending ${contextMessages.length} messages to OpenAI`);
-      const response =
+      const aiResponse =
         await this.openaiService.generateResponse(contextMessages);
 
-      // 7. Сохранить ответ в БД
-      await this.conversationService.saveMessage(
-        conversation.id,
-        'assistant',
-        response,
-      );
+      // 7. Обработать ответ в зависимости от типа (реакция или текст)
+      if (aiResponse.responseType === 'reaction') {
+        // Валидация: проверяем что эмодзи из разрешенного списка
+        const allowedReactions = ['👍', '❤️', '❤', '🔥', '🎉', '👏', '😁'];
+        if (!allowedReactions.includes(aiResponse.content)) {
+          this.logger.warn(
+            `GPT chose invalid reaction: ${aiResponse.content}. Falling back to text response.`,
+          );
+          // Fallback: отправляем текстовое подтверждение вместо реакции
+          const fallbackText = aiResponse.content === '👋' ? 'йоу' : 'ок';
+          await this.conversationService.saveMessage(
+            conversation.id,
+            'assistant',
+            fallbackText,
+          );
+          await this.telegramService.sendMessage(telegramId, fallbackText);
+        } else {
+          // Найти последнее сообщение пользователя для отправки реакции
+          const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
+          if (!lastPendingMessage?.telegramMessageId) {
+            this.logger.error(
+              'Cannot send reaction: no telegram message ID found',
+            );
+            throw new Error('Missing telegram message ID for reaction');
+          }
 
-      // 8. Отправить ответ в Telegram
-      await this.telegramService.sendMessage(telegramId, response);
+          try {
+            // Отправить реакцию
+            this.logger.log(
+              `Sending reaction ${aiResponse.content} to message ${lastPendingMessage.telegramMessageId}`,
+            );
+            await this.telegramService.sendReaction(
+              telegramId,
+              lastPendingMessage.telegramMessageId,
+              aiResponse.content,
+            );
+
+            // Сохранить реакцию в БД как текстовое представление
+            await this.conversationService.saveMessage(
+              conversation.id,
+              'assistant',
+              `[Реакция: ${aiResponse.content}]`,
+            );
+          } catch (error) {
+            // Fallback: если реакция не сработала, отправляем текст
+            this.logger.warn(
+              `Failed to send reaction, falling back to text response`,
+              error,
+            );
+            const fallbackText = 'ок';
+            await this.conversationService.saveMessage(
+              conversation.id,
+              'assistant',
+              fallbackText,
+            );
+            await this.telegramService.sendMessage(telegramId, fallbackText);
+          }
+        }
+      } else {
+        // Текстовый ответ - показать "печатает..." и отправить
+        await this.telegramService.setTyping(telegramId, true);
+
+        await this.conversationService.saveMessage(
+          conversation.id,
+          'assistant',
+          aiResponse.content,
+        );
+
+        await this.telegramService.sendMessage(telegramId, aiResponse.content);
+      }
 
       // 9. Пометить pending сообщения как обработанные
       const pendingMessageIds = pendingMessages.map((msg) => msg.id);

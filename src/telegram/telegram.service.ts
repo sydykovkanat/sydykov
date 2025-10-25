@@ -9,6 +9,7 @@ import { Api } from 'telegram/tl';
 
 import { ConversationService } from '../conversation/conversation.service';
 import { MESSAGE_QUEUE } from '../queue/shared-queue.module';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -19,6 +20,7 @@ export class TelegramService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly conversationService: ConversationService,
+    private readonly rateLimitService: RateLimitService,
     @InjectQueue(MESSAGE_QUEUE) private readonly messageQueue: Queue,
   ) {
     const apiId = this.configService.get<number>('telegram.apiId');
@@ -146,6 +148,37 @@ export class TelegramService implements OnModuleInit {
           this.logger.log(
             `Received message from ${firstName} (${telegramId}): "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}" ${hasPhoto ? '[with photo]' : ''}`,
           );
+
+          // Проверяем rate limit
+          const rateLimitStatus =
+            await this.rateLimitService.checkLimit(telegramId);
+
+          if (rateLimitStatus.exceeded) {
+            // Если лимит превышен и предупреждение еще не отправлено
+            if (!rateLimitStatus.warningSent) {
+              const warningMessage = this.configService.get<string>(
+                'rateLimit.warningMessage',
+                'Я сейчас занят, чуть позже отвечу 🙏',
+              );
+
+              await this.sendMessage(Number(sender.id), warningMessage);
+              await this.rateLimitService.markWarningSent(telegramId);
+
+              this.logger.warn(
+                `Rate limit exceeded for ${telegramId} (${rateLimitStatus.currentCount}/${rateLimitStatus.limit}). Warning sent.`,
+              );
+            } else {
+              this.logger.debug(
+                `Rate limit exceeded for ${telegramId}, ignoring message (warning already sent)`,
+              );
+            }
+
+            // НЕ читаем сообщение, НЕ обрабатываем
+            return;
+          }
+
+          // Инкрементируем счетчик (лимит не превышен)
+          await this.rateLimitService.incrementCounter(telegramId);
 
           // Находим или создаем пользователя
           const user = await this.conversationService.findOrCreateUser(
@@ -295,6 +328,35 @@ export class TelegramService implements OnModuleInit {
       this.logger.log(`Sent message to ${telegramId}`);
     } catch (error) {
       this.logger.error(`Failed to send message to ${telegramId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Отправляет реакцию на сообщение
+   * @param telegramId - ID пользователя
+   * @param messageId - ID сообщения, на которое отправляется реакция
+   * @param emoji - Эмодзи реакции (👍❤️🔥🎉👏😁)
+   */
+  async sendReaction(
+    telegramId: number,
+    messageId: number,
+    emoji: string,
+  ): Promise<void> {
+    try {
+      await this.client.invoke(
+        new Api.messages.SendReaction({
+          peer: telegramId,
+          msgId: messageId,
+          reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
+        }),
+      );
+      this.logger.log(`Sent reaction ${emoji} to message ${messageId} for ${telegramId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to send reaction to ${telegramId} on message ${messageId}`,
+        error,
+      );
       throw error;
     }
   }

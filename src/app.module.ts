@@ -7,6 +7,7 @@ import { ConversationModule } from './conversation/conversation.module';
 import { DatabaseModule } from './database/database.module';
 import { OpenAIModule } from './openai/openai.module';
 import { QueueModule } from './queue/queue.module';
+import { RateLimitModule } from './rate-limit/rate-limit.module';
 import { TelegramModule } from './telegram/telegram.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { TelegramModule } from './telegram/telegram.module';
     // Core modules
     DatabaseModule,
     QueueModule,
+    RateLimitModule,
     OpenAIModule,
     ConversationModule,
     TelegramModule,

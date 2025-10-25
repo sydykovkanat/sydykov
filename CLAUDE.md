@@ -53,7 +53,10 @@ yarn docker:logs          # View container logs
 1. **TelegramService** ([telegram.service.ts](src/telegram/telegram.service.ts)) receives message from Telegram via MTProto
    - Uses `TelegramClient` with `NewMessage` event handler
    - Filters: Only private chats (`PeerUser`), ignores outgoing messages (`message.out === false`)
-   - Extracts text and photo URLs (TODO: implement photo download/storage)
+   - **Checks rate limit** via `RateLimitService`:
+     - If exceeded: sends warning (first time) or silently ignores (subsequent), skips processing
+     - If OK: increments counter and continues
+   - Extracts text and downloads photos as base64 (via `client.downloadMedia()`)
    - Calls `ConversationService.savePendingMessage()` to store in `PendingMessage` table
    - Adds job to BullMQ queue with 10-second delay (configurable via `MESSAGE_DELAY_SECONDS`)
    - **Asynchronously marks message as read** after random delay of 3-5 seconds (`markAsReadWithDelay()`) - simulates human reading time
@@ -68,11 +71,12 @@ yarn docker:logs          # View container logs
    - Saves them to `Message` table with role='user'
    - Loads conversation context (summary + last N messages)
    - **Shows "typing..." indicator** (`setTyping()`) - user sees typing animation
-   - Calls OpenAI API with context
-   - Saves assistant response to `Message` table
-   - Sends reply via Telegram (typing indicator auto-cancels)
+   - Calls OpenAI API with **structured output** (returns `{responseType, content}`)
+   - **Handles response based on type**:
+     - If `responseType === "reaction"`: sends emoji reaction via `sendReaction()`, saves as `[Реакция: emoji]`
+     - If `responseType === "text"`: sends text message, saves normally
    - Marks pending messages as processed
-   - Triggers conversation summarization if needed
+   - Triggers conversation summarization if needed (when messages > `SUMMARY_THRESHOLD`)
 
 ### Key Architectural Patterns
 
@@ -87,13 +91,29 @@ yarn docker:logs          # View container logs
 
 **Read Receipts & Typing**: The assistant marks messages as read after a random delay of 3-5 seconds (simulating human reading time) and shows "typing..." status while generating a response. This makes interactions feel natural and human-like.
 
+**Rate Limiting**: Protection against message spam with Redis-based rate limiting:
+- Maximum 50 messages per hour per user (configurable via `RATE_LIMIT_MAX_MESSAGES_PER_HOUR`)
+- When limit is exceeded:
+  - First time: sends warning message (configurable via `RATE_LIMIT_WARNING_MESSAGE`)
+  - Subsequent messages: silently ignored (not read, not processed)
+- Counter resets automatically after 1 hour
+- Implementation: [rate-limit.service.ts](src/rate-limit/rate-limit.service.ts)
+
+**Smart Reactions**: GPT can respond with emoji reactions instead of text when appropriate:
+- Uses OpenAI structured output to decide: reaction or text
+- Available reactions: 👍 ❤️ 🔥 🎉 👏 😁
+- Examples: "окей" → 👍, "спасибо" → ❤️, "ахаха" → 😁
+- Logic defined in [base.prompt.txt](base.prompt.txt)
+- Reactions are sent via MTProto API and saved to DB as `[Реакция: 👍]` for context
+
 ## Module Structure
 
 - **AppModule** ([app.module.ts](src/app.module.ts)): Root module, imports all others
 - **TelegramModule**: Telegraf bot setup and message handling
 - **QueueModule**: BullMQ configuration and shared queue
+- **RateLimitModule**: Redis-based rate limiting for spam protection
 - **ConversationModule**: Business logic for conversations, messages, users
-- **OpenAIModule**: OpenAI API integration
+- **OpenAIModule**: OpenAI API integration with structured output for reactions
 - **DatabaseModule**: Prisma service wrapper
 - **ConfigModule**: Environment variables with validation
 
@@ -136,10 +156,14 @@ Required environment variables (see `.env.example`):
 
 ### Other Configuration
 - `OPENAI_API_KEY`: OpenAI API key
+- `OPENAI_MODEL`: Model to use (default: gpt-4o for vision support)
 - `DATABASE_URL`: PostgreSQL connection string
 - `REDIS_HOST`, `REDIS_PORT`: Redis connection
 - `MESSAGE_DELAY_SECONDS`: Debounce delay (default: 10)
 - `CONTEXT_MESSAGES_LIMIT`: How many recent messages to include (default: 20)
+- `SUMMARY_THRESHOLD`: Message count before summarization (default: 50)
+- `RATE_LIMIT_MAX_MESSAGES_PER_HOUR`: Max messages per user per hour (default: 50)
+- `RATE_LIMIT_WARNING_MESSAGE`: Warning message when limit exceeded (default: "Я сейчас занят, чуть позже отвечу 🙏")
 
 Configuration is validated via [config/configuration.ts](src/config/configuration.ts) using class-validator.
 

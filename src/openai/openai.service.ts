@@ -17,6 +17,11 @@ export interface ChatMessage {
   content: MessageContent;
 }
 
+export interface AIResponse {
+  responseType: 'reaction' | 'text';
+  content: string; // Emoji (👍❤️🔥🎉👏😁) or text response
+}
+
 @Injectable()
 export class OpenAIService implements OnModuleInit {
   private readonly logger = new Logger(OpenAIService.name);
@@ -49,8 +54,9 @@ export class OpenAIService implements OnModuleInit {
 
   /**
    * Генерирует ответ на основе контекста разговора
+   * Возвращает structured output с типом ответа (реакция или текст)
    */
-  async generateResponse(messages: ChatMessage[]): Promise<string> {
+  async generateResponse(messages: ChatMessage[]): Promise<AIResponse> {
     try {
       const systemMessage: ChatMessage = {
         role: 'system',
@@ -62,16 +68,47 @@ export class OpenAIService implements OnModuleInit {
         messages: [systemMessage, ...messages] as ChatCompletionMessageParam[],
         max_tokens: this.maxTokens,
         temperature: 0.8,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'response_with_reaction',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                responseType: {
+                  type: 'string',
+                  enum: ['reaction', 'text'],
+                  description:
+                    'Type of response: "reaction" for emoji reaction, "text" for text message',
+                },
+                content: {
+                  type: 'string',
+                  description:
+                    'If responseType is "reaction", content MUST be EXACTLY one of these 6 emojis: 👍 ❤ 🔥 🎉 👏 😁 (NO OTHER EMOJIS ALLOWED, not even 👋 or 🙏). If responseType is "text", content is the text message in Russian.',
+                },
+              },
+              required: ['responseType', 'content'],
+              additionalProperties: false,
+            },
+          },
+        },
       });
 
-      const response = completion.choices[0]?.message?.content;
+      const responseContent = completion.choices[0]?.message?.content;
 
-      if (!response) {
+      if (!responseContent) {
         throw new Error('No response from OpenAI');
       }
 
-      this.logger.debug(`Generated response: ${response.substring(0, 100)}...`);
-      return response;
+      // Парсим JSON ответ
+      const aiResponse: AIResponse = JSON.parse(responseContent);
+
+      this.logger.debug(
+        `Generated ${aiResponse.responseType}: ${aiResponse.responseType === 'reaction' ? aiResponse.content : aiResponse.content.substring(0, 100) + '...'}`,
+      );
+
+      return aiResponse;
     } catch (error) {
       this.logger.error('Failed to generate response from OpenAI', error);
       throw error;

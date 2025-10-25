@@ -106,6 +106,17 @@ export class EnvironmentVariables {
   @Max(200)
   SUMMARY_THRESHOLD: number = 50;
 
+  // Rate Limiting
+  @IsInt()
+  @IsPositive()
+  @Min(1)
+  @Max(1000)
+  RATE_LIMIT_MAX_MESSAGES_PER_HOUR: number = 50;
+
+  @IsString()
+  @IsOptional()
+  RATE_LIMIT_WARNING_MESSAGE?: string = 'Я сейчас занят, чуть позже отвечу 🙏';
+
   // Logging
   @IsEnum(LogLevel)
   @IsOptional()
@@ -159,6 +170,15 @@ export default () => ({
       10,
     ),
     summaryThreshold: parseInt(process.env.SUMMARY_THRESHOLD || '50', 10),
+  },
+  rateLimit: {
+    maxMessagesPerHour: parseInt(
+      process.env.RATE_LIMIT_MAX_MESSAGES_PER_HOUR || '50',
+      10,
+    ),
+    warningMessage:
+      process.env.RATE_LIMIT_WARNING_MESSAGE ||
+      'Я сейчас занят, чуть позже отвечу 🙏',
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
