@@ -92,29 +92,59 @@ export class TelegramService implements OnModuleInit {
           // Получаем текст сообщения
           let messageText = message.text || '';
 
-          // Обрабатываем фото
-          const imageUrls: string[] = [];
-          if (message.media && message.media instanceof Api.MessageMediaPhoto) {
-            try {
-              // Скачиваем фото и получаем URL
-              // В продакшене лучше сохранять фото локально или в S3
-              // Пока просто логируем что фото есть
-              this.logger.debug('Message contains photo');
-              // TODO: Реализовать скачивание и хранение фото
-              // const buffer = await this.client.downloadMedia(message.media);
-            } catch (error) {
-              this.logger.error('Failed to process photo', error);
+          // Проверяем и фильтруем типы медиа
+          const imageBase64List: string[] = [];
+          let hasPhoto = false;
+
+          if (message.media) {
+            // Разрешаем только фото
+            if (message.media instanceof Api.MessageMediaPhoto) {
+              hasPhoto = true;
+              try {
+                // Скачиваем фото как Buffer
+                this.logger.debug('Downloading photo...');
+                const buffer = await this.client.downloadMedia(message.media);
+
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  // Конвертируем в base64
+                  const base64Image = buffer.toString('base64');
+                  imageBase64List.push(base64Image);
+                  this.logger.debug(
+                    `Photo downloaded successfully (${buffer.length} bytes)`,
+                  );
+                } else {
+                  this.logger.warn('Downloaded media is not a Buffer');
+                }
+              } catch (error) {
+                this.logger.error('Failed to download photo', error);
+                // Продолжаем обработку даже если фото не скачалось
+              }
+            } else {
+              // Игнорируем другие типы медиа
+              const mediaType = message.media.className;
+              this.logger.debug(`Ignoring unsupported media type: ${mediaType}`);
+              return;
             }
           }
 
-          // Игнорируем сообщения без текста и без фото
-          if (!messageText && imageUrls.length === 0) {
-            this.logger.debug('Ignoring message without text and photos');
+          // Разрешаем сообщения с текстом ИЛИ с фото
+          if (!messageText && !hasPhoto) {
+            this.logger.debug('Ignoring message without text and without photo');
             return;
           }
 
+          // Антиспам: берем только первое фото (если пришло несколько)
+          const finalImageBase64 =
+            imageBase64List.length > 0 ? imageBase64List[0] : undefined;
+
+          if (imageBase64List.length > 1) {
+            this.logger.warn(
+              `User sent ${imageBase64List.length} photos, using only the first one (anti-spam)`,
+            );
+          }
+
           this.logger.log(
-            `Received message from ${firstName} (${telegramId}): ${messageText.substring(0, 50)}... with ${imageUrls.length} photo(s)`,
+            `Received message from ${firstName} (${telegramId}): "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}" ${hasPhoto ? '[with photo]' : ''}`,
           );
 
           // Находим или создаем пользователя
@@ -132,7 +162,8 @@ export class TelegramService implements OnModuleInit {
             messageText,
             messageId,
             this.messageDelaySeconds,
-            imageUrls,
+            [], // imageUrls deprecated
+            finalImageBase64,
           );
 
           // Добавляем задачу в очередь с задержкой

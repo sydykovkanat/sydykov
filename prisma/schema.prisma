@@ -48,7 +48,8 @@ model Message {
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   role              String // 'user' или 'assistant'
   content           String       @db.Text
-  imageUrls         String[]     @default([]) // URL картинок в сообщении
+  imageUrls         String[]     @default([]) // URL картинок в сообщении (deprecated)
+  imageBase64       String?      @db.Text // Base64 изображение для GPT Vision (только первое фото)
   telegramMessageId Int? // ID сообщения в Telegram для user messages
   createdAt         DateTime     @default(now())
 
@@ -62,7 +63,8 @@ model PendingMessage {
   userId            String // ID пользователя в нашей БД
   telegramId        BigInt // Telegram ID пользователя
   content           String   @db.Text
-  imageUrls         String[] @default([]) // URL картинок в сообщении
+  imageUrls         String[] @default([]) // URL картинок в сообщении (deprecated)
+  imageBase64       String?  @db.Text // Base64 изображение для GPT Vision (только первое фото)
   telegramMessageId Int // ID сообщения в Telegram
   scheduledFor      DateTime // Когда нужно обработать (now + 10 секунд)
   processed         Boolean  @default(false)

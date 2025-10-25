@@ -85,6 +85,7 @@ export class ConversationService {
     content: string,
     telegramMessageId?: number,
     imageUrls: string[] = [],
+    imageBase64?: string,
   ) {
     const message = await this.prisma.message.create({
       data: {
@@ -93,6 +94,7 @@ export class ConversationService {
         content,
         telegramMessageId,
         imageUrls,
+        imageBase64,
       },
     });
 
@@ -137,8 +139,11 @@ export class ConversationService {
     // Добавляем последние N сообщений (в обратном порядке, чтобы были от старых к новым)
     const recentMessages = conversation.messages.reverse();
     for (const msg of recentMessages) {
-      // Если есть картинки, формируем массив content
-      if (msg.imageUrls && msg.imageUrls.length > 0) {
+      // Если есть imageBase64 или imageUrls, формируем массив content
+      const hasImages =
+        (msg.imageUrls && msg.imageUrls.length > 0) || msg.imageBase64;
+
+      if (hasImages) {
         const contentArray: Array<
           | { type: 'text'; text: string }
           | { type: 'image_url'; image_url: { url: string } }
@@ -148,11 +153,22 @@ export class ConversationService {
           contentArray.push({ type: 'text', text: msg.content });
         }
 
-        for (const imageUrl of msg.imageUrls) {
+        // Приоритет: base64 изображение (новый формат)
+        if (msg.imageBase64) {
           contentArray.push({
             type: 'image_url',
-            image_url: { url: imageUrl },
+            image_url: {
+              url: `data:image/jpeg;base64,${msg.imageBase64}`,
+            },
           });
+        } else if (msg.imageUrls && msg.imageUrls.length > 0) {
+          // Fallback на старый формат (imageUrls)
+          for (const imageUrl of msg.imageUrls) {
+            contentArray.push({
+              type: 'image_url',
+              image_url: { url: imageUrl },
+            });
+          }
         }
 
         messages.push({
@@ -249,6 +265,7 @@ export class ConversationService {
     telegramMessageId: number,
     delaySeconds: number,
     imageUrls: string[] = [],
+    imageBase64?: string,
   ) {
     const scheduledFor = new Date(Date.now() + delaySeconds * 1000);
 
@@ -260,6 +277,7 @@ export class ConversationService {
         telegramMessageId,
         scheduledFor,
         imageUrls,
+        imageBase64,
       },
     });
   }

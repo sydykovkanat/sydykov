@@ -55,6 +55,7 @@ export class MessageProcessor {
           pendingMsg.content,
           pendingMsg.telegramMessageId,
           pendingMsg.imageUrls,
+          pendingMsg.imageBase64 || undefined,
         );
       }
 
