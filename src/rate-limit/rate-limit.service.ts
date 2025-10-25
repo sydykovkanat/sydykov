@@ -61,10 +61,7 @@ export class RateLimitService {
         limit: this.maxMessagesPerHour,
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to check rate limit for ${telegramId}`,
-        error,
-      );
+      this.logger.error(`Failed to check rate limit for ${telegramId}`, error);
       // В случае ошибки не блокируем пользователя
       return {
         exceeded: false,
@@ -134,10 +131,7 @@ export class RateLimitService {
       const ttl = await this.redis.ttl(key);
       return ttl > 0 ? ttl : 0;
     } catch (error) {
-      this.logger.error(
-        `Failed to get TTL for ${telegramId}`,
-        error,
-      );
+      this.logger.error(`Failed to get TTL for ${telegramId}`, error);
       return 0;
     }
   }
@@ -152,10 +146,7 @@ export class RateLimitService {
       await this.redis.del(key);
       this.logger.log(`Reset rate limit for ${telegramId}`);
     } catch (error) {
-      this.logger.error(
-        `Failed to reset rate limit for ${telegramId}`,
-        error,
-      );
+      this.logger.error(`Failed to reset rate limit for ${telegramId}`, error);
     }
   }
 

@@ -32,6 +32,25 @@ export class MessageProcessor {
     try {
       const { userId, telegramId } = job.data;
 
+      // 0. Проверить, не находится ли чат в игнор-листе
+      const isIgnored =
+        await this.conversationService.isConversationIgnored(userId);
+      if (isIgnored) {
+        this.logger.debug(
+          `Conversation with user ${userId} is ignored, skipping processing`,
+        );
+        // Помечаем pending сообщения как обработанные, чтобы они не накапливались
+        const pendingMessages =
+          await this.conversationService.getPendingMessages(userId);
+        if (pendingMessages.length > 0) {
+          const pendingMessageIds = pendingMessages.map((msg) => msg.id);
+          await this.conversationService.markPendingMessagesAsProcessed(
+            pendingMessageIds,
+          );
+        }
+        return { success: true, ignored: true };
+      }
+
       // 1. Получить все непрочитанные сообщения от пользователя из PendingMessage
       const pendingMessages =
         await this.conversationService.getPendingMessages(userId);
@@ -86,7 +105,8 @@ export class MessageProcessor {
           await this.telegramService.sendMessage(telegramId, fallbackText);
         } else {
           // Найти последнее сообщение пользователя для отправки реакции
-          const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
+          const lastPendingMessage =
+            pendingMessages[pendingMessages.length - 1];
           if (!lastPendingMessage?.telegramMessageId) {
             this.logger.error(
               'Cannot send reaction: no telegram message ID found',

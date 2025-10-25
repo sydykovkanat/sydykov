@@ -308,4 +308,30 @@ export class ConversationService {
       },
     });
   }
+
+  /**
+   * Устанавливает флаг игнорирования для чата (команда "стоп Канатик")
+   */
+  async setConversationIgnored(userId: string, ignored: boolean) {
+    const conversation = await this.findOrCreateConversation(userId);
+    await this.prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { isIgnored: ignored },
+    });
+    this.logger.log(
+      `Conversation ${conversation.id} isIgnored set to ${ignored}`,
+    );
+  }
+
+  /**
+   * Проверяет, игнорируется ли чат
+   */
+  async isConversationIgnored(userId: string): Promise<boolean> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { userId },
+      orderBy: { lastMessageAt: 'desc' },
+    });
+
+    return conversation?.isIgnored ?? false;
+  }
 }

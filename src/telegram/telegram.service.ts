@@ -3,8 +3,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bull';
 import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
 import { NewMessage, NewMessageEvent } from 'telegram/events';
+import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
 
 import { ConversationService } from '../conversation/conversation.service';
@@ -61,172 +61,183 @@ export class TelegramService implements OnModuleInit {
 
   private setupHandlers() {
     // Обработчик входящих сообщений
-    this.client.addEventHandler(
-      async (event: NewMessageEvent) => {
-        try {
-          const message = event.message;
+    this.client.addEventHandler(async (event: NewMessageEvent) => {
+      try {
+        const message = event.message;
 
-          // Игнорируем исходящие сообщения (отправленные нами)
-          if (message.out) {
-            return;
-          }
+        // Обрабатываем команды управления ботом (исходящие сообщения)
+        if (message.out) {
+          await this.handleControlCommands(message);
+          return;
+        }
 
-          // Игнорируем сообщения не из приватных чатов
-          const peerId = message.peerId;
-          if (!peerId || !(peerId instanceof Api.PeerUser)) {
-            this.logger.debug(`Ignoring message from non-private chat`);
-            return;
-          }
+        // Игнорируем сообщения не из приватных чатов
+        const peerId = message.peerId;
+        if (!peerId || !(peerId instanceof Api.PeerUser)) {
+          this.logger.debug(`Ignoring message from non-private chat`);
+          return;
+        }
 
-          // Получаем отправителя
-          const sender = await message.getSender();
-          if (!sender || !(sender instanceof Api.User)) {
-            this.logger.debug('Sender is not a user, ignoring');
-            return;
-          }
+        // Получаем отправителя
+        const sender = await message.getSender();
+        if (!sender || !(sender instanceof Api.User)) {
+          this.logger.debug('Sender is not a user, ignoring');
+          return;
+        }
 
-          const telegramId = BigInt(sender.id.toString());
-          const username = (sender as any).username || undefined;
-          const firstName = sender.firstName || '';
-          const lastName = sender.lastName || undefined;
-          const messageId = message.id;
+        const telegramId = BigInt(sender.id.toString());
+        const username = (sender as any).username || undefined;
+        const firstName = sender.firstName || '';
+        const lastName = sender.lastName || undefined;
+        const messageId = message.id;
 
-          // Получаем текст сообщения
-          let messageText = message.text || '';
+        // Получаем текст сообщения
+        const messageText = message.text || '';
 
-          // Проверяем и фильтруем типы медиа
-          const imageBase64List: string[] = [];
-          let hasPhoto = false;
+        // Проверяем и фильтруем типы медиа
+        const imageBase64List: string[] = [];
+        let hasPhoto = false;
 
-          if (message.media) {
-            // Разрешаем только фото
-            if (message.media instanceof Api.MessageMediaPhoto) {
-              hasPhoto = true;
-              try {
-                // Скачиваем фото как Buffer
-                this.logger.debug('Downloading photo...');
-                const buffer = await this.client.downloadMedia(message.media);
+        if (message.media) {
+          // Разрешаем только фото
+          if (message.media instanceof Api.MessageMediaPhoto) {
+            hasPhoto = true;
+            try {
+              // Скачиваем фото как Buffer
+              this.logger.debug('Downloading photo...');
+              const buffer = await this.client.downloadMedia(message.media);
 
-                if (buffer && Buffer.isBuffer(buffer)) {
-                  // Конвертируем в base64
-                  const base64Image = buffer.toString('base64');
-                  imageBase64List.push(base64Image);
-                  this.logger.debug(
-                    `Photo downloaded successfully (${buffer.length} bytes)`,
-                  );
-                } else {
-                  this.logger.warn('Downloaded media is not a Buffer');
-                }
-              } catch (error) {
-                this.logger.error('Failed to download photo', error);
-                // Продолжаем обработку даже если фото не скачалось
+              if (buffer && Buffer.isBuffer(buffer)) {
+                // Конвертируем в base64
+                const base64Image = buffer.toString('base64');
+                imageBase64List.push(base64Image);
+                this.logger.debug(
+                  `Photo downloaded successfully (${buffer.length} bytes)`,
+                );
+              } else {
+                this.logger.warn('Downloaded media is not a Buffer');
               }
-            } else {
-              // Игнорируем другие типы медиа
-              const mediaType = message.media.className;
-              this.logger.debug(`Ignoring unsupported media type: ${mediaType}`);
-              return;
+            } catch (error) {
+              this.logger.error('Failed to download photo', error);
+              // Продолжаем обработку даже если фото не скачалось
             }
-          }
-
-          // Разрешаем сообщения с текстом ИЛИ с фото
-          if (!messageText && !hasPhoto) {
-            this.logger.debug('Ignoring message without text and without photo');
+          } else {
+            // Игнорируем другие типы медиа
+            const mediaType = message.media.className;
+            this.logger.debug(`Ignoring unsupported media type: ${mediaType}`);
             return;
           }
+        }
 
-          // Антиспам: берем только первое фото (если пришло несколько)
-          const finalImageBase64 =
-            imageBase64List.length > 0 ? imageBase64List[0] : undefined;
+        // Разрешаем сообщения с текстом ИЛИ с фото
+        if (!messageText && !hasPhoto) {
+          this.logger.debug('Ignoring message without text and without photo');
+          return;
+        }
 
-          if (imageBase64List.length > 1) {
+        // Антиспам: берем только первое фото (если пришло несколько)
+        const finalImageBase64 =
+          imageBase64List.length > 0 ? imageBase64List[0] : undefined;
+
+        if (imageBase64List.length > 1) {
+          this.logger.warn(
+            `User sent ${imageBase64List.length} photos, using only the first one (anti-spam)`,
+          );
+        }
+
+        this.logger.log(
+          `Received message from ${firstName} (${telegramId}): "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}" ${hasPhoto ? '[with photo]' : ''}`,
+        );
+
+        // Проверяем rate limit
+        const rateLimitStatus =
+          await this.rateLimitService.checkLimit(telegramId);
+
+        if (rateLimitStatus.exceeded) {
+          // Если лимит превышен и предупреждение еще не отправлено
+          if (!rateLimitStatus.warningSent) {
+            const warningMessage = this.configService.get<string>(
+              'rateLimit.warningMessage',
+              'Я сейчас занят, чуть позже отвечу 🙏',
+            );
+
+            await this.sendMessage(Number(sender.id), warningMessage);
+            await this.rateLimitService.markWarningSent(telegramId);
+
             this.logger.warn(
-              `User sent ${imageBase64List.length} photos, using only the first one (anti-spam)`,
+              `Rate limit exceeded for ${telegramId} (${rateLimitStatus.currentCount}/${rateLimitStatus.limit}). Warning sent.`,
+            );
+          } else {
+            this.logger.debug(
+              `Rate limit exceeded for ${telegramId}, ignoring message (warning already sent)`,
             );
           }
 
-          this.logger.log(
-            `Received message from ${firstName} (${telegramId}): "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}" ${hasPhoto ? '[with photo]' : ''}`,
-          );
-
-          // Проверяем rate limit
-          const rateLimitStatus =
-            await this.rateLimitService.checkLimit(telegramId);
-
-          if (rateLimitStatus.exceeded) {
-            // Если лимит превышен и предупреждение еще не отправлено
-            if (!rateLimitStatus.warningSent) {
-              const warningMessage = this.configService.get<string>(
-                'rateLimit.warningMessage',
-                'Я сейчас занят, чуть позже отвечу 🙏',
-              );
-
-              await this.sendMessage(Number(sender.id), warningMessage);
-              await this.rateLimitService.markWarningSent(telegramId);
-
-              this.logger.warn(
-                `Rate limit exceeded for ${telegramId} (${rateLimitStatus.currentCount}/${rateLimitStatus.limit}). Warning sent.`,
-              );
-            } else {
-              this.logger.debug(
-                `Rate limit exceeded for ${telegramId}, ignoring message (warning already sent)`,
-              );
-            }
-
-            // НЕ читаем сообщение, НЕ обрабатываем
-            return;
-          }
-
-          // Инкрементируем счетчик (лимит не превышен)
-          await this.rateLimitService.incrementCounter(telegramId);
-
-          // Находим или создаем пользователя
-          const user = await this.conversationService.findOrCreateUser(
-            telegramId,
-            username,
-            firstName,
-            lastName,
-          );
-
-          // Сохраняем сообщение как pending
-          await this.conversationService.savePendingMessage(
-            user.id,
-            telegramId,
-            messageText,
-            messageId,
-            this.messageDelaySeconds,
-            [], // imageUrls deprecated
-            finalImageBase64,
-          );
-
-          // Добавляем задачу в очередь с задержкой
-          await this.messageQueue.add(
-            'process-message',
-            {
-              userId: user.id,
-              telegramId: Number(sender.id),
-            },
-            {
-              delay: this.messageDelaySeconds * 1000,
-              jobId: `${user.id}-${Date.now()}`,
-            },
-          );
-
-          this.logger.debug(
-            `Added message to queue with ${this.messageDelaySeconds}s delay`,
-          );
-
-          // Отмечаем сообщение как прочитанное с задержкой 3-5 секунд
-          // Запускаем асинхронно, не блокируя основной поток
-          this.markAsReadWithDelay(Number(sender.id), 3, 5).catch((err) => {
-            this.logger.error('Failed to mark as read with delay', err);
-          });
-        } catch (error) {
-          this.logger.error('Error handling message', error);
+          // НЕ читаем сообщение, НЕ обрабатываем
+          return;
         }
-      },
-      new NewMessage({}),
-    );
+
+        // Инкрементируем счетчик (лимит не превышен)
+        await this.rateLimitService.incrementCounter(telegramId);
+
+        // Находим или создаем пользователя
+        const user = await this.conversationService.findOrCreateUser(
+          telegramId,
+          username,
+          firstName,
+          lastName,
+        );
+
+        // Проверяем, не находится ли чат в игнор-листе
+        const isIgnored = await this.conversationService.isConversationIgnored(
+          user.id,
+        );
+        if (isIgnored) {
+          this.logger.debug(
+            `Conversation with ${telegramId} is ignored, skipping message`,
+          );
+          // Все равно отмечаем как прочитанное, чтобы не было непрочитанных
+          await this.markAsRead(Number(sender.id));
+          return;
+        }
+
+        // Сохраняем сообщение как pending
+        await this.conversationService.savePendingMessage(
+          user.id,
+          telegramId,
+          messageText,
+          messageId,
+          this.messageDelaySeconds,
+          [], // imageUrls deprecated
+          finalImageBase64,
+        );
+
+        // Добавляем задачу в очередь с задержкой
+        await this.messageQueue.add(
+          'process-message',
+          {
+            userId: user.id,
+            telegramId: Number(sender.id),
+          },
+          {
+            delay: this.messageDelaySeconds * 1000,
+            jobId: `${user.id}-${Date.now()}`,
+          },
+        );
+
+        this.logger.debug(
+          `Added message to queue with ${this.messageDelaySeconds}s delay`,
+        );
+
+        // Отмечаем сообщение как прочитанное с задержкой 3-5 секунд
+        // Запускаем асинхронно, не блокируя основной поток
+        this.markAsReadWithDelay(Number(sender.id), 3, 5).catch((err) => {
+          this.logger.error('Failed to mark as read with delay', err);
+        });
+      } catch (error) {
+        this.logger.error('Error handling message', error);
+      }
+    }, new NewMessage({}));
 
     // Graceful shutdown
     const shutdown = async () => {
@@ -237,6 +248,60 @@ export class TelegramService implements OnModuleInit {
 
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
+  }
+
+  /**
+   * Обрабатывает команды управления ботом (стоп/продолжай Канатик)
+   */
+  private async handleControlCommands(message: any): Promise<void> {
+    try {
+      const text = (message.text || '').trim().toLowerCase();
+
+      this.logger.debug(`Checking outgoing message: "${text}"`);
+
+      // Проверяем команды
+      if (!text.includes('канатик')) {
+        return;
+      }
+
+      this.logger.debug(`Found 'канатик' in message, checking chat type...`);
+
+      // Проверяем, что это приватный чат
+      const peerId = message.peerId;
+      if (!peerId || !(peerId instanceof Api.PeerUser)) {
+        this.logger.debug(`Not a private chat, ignoring`);
+        return;
+      }
+
+      // Получаем ID собеседника из peerId
+      const chatId = peerId.userId;
+      const telegramId = BigInt(chatId.toString());
+
+      this.logger.debug(`Processing command for chat ${telegramId}`);
+
+      // Находим пользователя в БД
+      const user = await this.conversationService.findOrCreateUser(telegramId);
+
+      if (text.includes('стоп')) {
+        // Команда "стоп Канатик"
+        this.logger.log(`Processing "стоп Канатик" command for ${telegramId}`);
+        await this.conversationService.setConversationIgnored(user.id, true);
+        this.logger.log(
+          `✅ Conversation with ${telegramId} added to ignore list`,
+        );
+      } else if (text.includes('продолжай')) {
+        // Команда "продолжай Канатик"
+        this.logger.log(
+          `Processing "продолжай Канатик" command for ${telegramId}`,
+        );
+        await this.conversationService.setConversationIgnored(user.id, false);
+        this.logger.log(
+          `✅ Conversation with ${telegramId} removed from ignore list`,
+        );
+      }
+    } catch (error) {
+      this.logger.error('❌ Error handling control commands', error);
+    }
   }
 
   /**
@@ -312,7 +377,10 @@ export class TelegramService implements OnModuleInit {
       );
       this.logger.debug(`Marked messages as read for ${telegramId}`);
     } catch (error) {
-      this.logger.error(`Failed to mark messages as read for ${telegramId}`, error);
+      this.logger.error(
+        `Failed to mark messages as read for ${telegramId}`,
+        error,
+      );
       // Не бросаем ошибку, это не критично
     }
   }
@@ -351,7 +419,9 @@ export class TelegramService implements OnModuleInit {
           reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
         }),
       );
-      this.logger.log(`Sent reaction ${emoji} to message ${messageId} for ${telegramId}`);
+      this.logger.log(
+        `Sent reaction ${emoji} to message ${messageId} for ${telegramId}`,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to send reaction to ${telegramId} on message ${messageId}`,
