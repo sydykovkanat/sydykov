@@ -238,12 +238,8 @@ export class TelegramService implements OnModuleInit {
                   `Processing owner command in Saved Messages: ${messageText.substring(0, 50)}...`,
                 );
 
-                // Редактируем сообщение с ответом
-                await this.editMessage(
-                  Number(sender.id),
-                  messageId,
-                  commandResult.response,
-                );
+                // Редактируем сообщение с ответом напрямую через объект message
+                await message.edit({ text: commandResult.response });
 
                 // Отмечаем как прочитанное
                 await this.markAsRead(Number(sender.id));
@@ -278,12 +274,8 @@ export class TelegramService implements OnModuleInit {
                 `Processing owner command in chat: ${messageText.substring(0, 50)}...`,
               );
 
-              // Редактируем сообщение с ответом
-              await this.editMessage(
-                Number(sender.id),
-                messageId,
-                commandResult.response,
-              );
+              // Редактируем сообщение с ответом напрямую через объект message
+              await message.edit({ text: commandResult.response });
 
               // Отмечаем как прочитанное
               await this.markAsRead(Number(sender.id));
@@ -498,12 +490,8 @@ export class TelegramService implements OnModuleInit {
               `Processing owner command: ${text.substring(0, 50)}...`,
             );
 
-            // Редактируем сообщение владельца с ответом
-            await this.editMessage(
-              Number(chatId),
-              message.id,
-              commandResult.response,
-            );
+            // Редактируем сообщение владельца с ответом напрямую через объект message
+            await message.edit({ text: commandResult.response });
 
             return; // Не обрабатываем как "стоп/продолжай"
           }
