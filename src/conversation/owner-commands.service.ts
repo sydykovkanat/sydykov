@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../database/prisma.service';
 
 import { ConversationService } from './conversation.service';
+import { FactsService } from './facts.service';
 
 export interface CommandResult {
   isCommand: boolean; // true если это выполненная команда (не нужно обрабатывать через AI)
@@ -21,6 +22,7 @@ export class OwnerCommandsService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly conversationService: ConversationService,
+    private readonly factsService: FactsService,
   ) {
     this.botName = this.configService.get<string>('bot.name', 'канатик');
     this.ownerTelegramId = this.configService.get<string>(
@@ -142,6 +144,27 @@ export class OwnerCommandsService {
       ])
     ) {
       response = await this.handleContinueChat(targetTelegramId);
+    } else if (
+      this.matchesCommand(commandText, ['факты', 'факты пользователя', 'facts'])
+    ) {
+      response = await this.handleGetFacts(targetTelegramId);
+    } else if (
+      commandText.startsWith('удалить факт ') ||
+      commandText.startsWith('delete fact ')
+    ) {
+      const category = commandText
+        .replace(/^удалить факт /, '')
+        .replace(/^delete fact /, '')
+        .trim();
+      response = await this.handleDeleteFact(targetTelegramId, category);
+    } else if (
+      this.matchesCommand(commandText, [
+        'очистить факты',
+        'удалить все факты',
+        'clear facts',
+      ])
+    ) {
+      response = await this.handleClearFacts(targetTelegramId);
     } else {
       // Неизвестная команда - отправить на обработку AI
       this.logger.debug(
@@ -211,6 +234,11 @@ export class OwnerCommandsService {
 ⚙️ Управление контекстом
 • \`канатик, установить контекст [текст]\` - установить персональный контекст
 • \`канатик, очистить контекст\` - удалить персональный контекст
+
+📝 Факты о пользователе
+• \`канатик, факты\` - показать все факты о текущем пользователе
+• \`канатик, удалить факт [категория]\` - удалить факт по категории
+• \`канатик, очистить факты\` - удалить все факты
 
 🚫 Игнор-лист
 • \`канатик, игнор-лист\` - список игнорируемых чатов
@@ -368,5 +396,80 @@ export class OwnerCommandsService {
     this.logger.log(`Chat with ${telegramId} removed from ignore list`);
 
     return 'Чат удален из игнор-листа. Я снова буду отвечать на сообщения.';
+  }
+
+  /**
+   * Команда: получить все факты о пользователе
+   */
+  private async handleGetFacts(telegramId: bigint): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId },
+    });
+
+    if (!user) {
+      return 'Пользователь не найден.';
+    }
+
+    const facts = await this.factsService.getFactsForUser(user.id);
+
+    if (facts.length === 0) {
+      return 'Нет сохраненных фактов о этом пользователе.';
+    }
+
+    const factsList = facts
+      .map(
+        ({ category, fact }) => `• **${category}**: ${fact}`,
+      )
+      .join('\n');
+
+    return `**Факты о пользователе** (${facts.length}):\n\n${factsList}`;
+  }
+
+  /**
+   * Команда: удалить факт по категории
+   */
+  private async handleDeleteFact(
+    telegramId: bigint,
+    category: string,
+  ): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId },
+    });
+
+    if (!user) {
+      return 'Пользователь не найден.';
+    }
+
+    const success = await this.factsService.deleteFactByCategory(
+      user.id,
+      category,
+    );
+
+    if (success) {
+      return `Факт с категорией "${category}" удален.`;
+    } else {
+      return `Не удалось удалить факт с категорией "${category}".`;
+    }
+  }
+
+  /**
+   * Команда: удалить все факты о пользователе
+   */
+  private async handleClearFacts(telegramId: bigint): Promise<string> {
+    const user = await this.prisma.user.findUnique({
+      where: { telegramId },
+    });
+
+    if (!user) {
+      return 'Пользователь не найден.';
+    }
+
+    const success = await this.factsService.deleteAllFactsForUser(user.id);
+
+    if (success) {
+      return 'Все факты о пользователе удалены.';
+    } else {
+      return 'Не удалось удалить факты.';
+    }
   }
 }

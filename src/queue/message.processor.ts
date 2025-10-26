@@ -1,11 +1,14 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Job } from 'bull';
 
 import { ConversationService } from '../conversation/conversation.service';
+import { FactsService } from '../conversation/facts.service';
 import { OpenAIService } from '../openai/openai.service';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { getTypoFixDelay, introduceTypo } from '../utils/typo-generator';
 
 import { MESSAGE_QUEUE } from './shared-queue.module';
 
@@ -17,13 +20,58 @@ export interface MessageJob {
 @Processor(MESSAGE_QUEUE)
 export class MessageProcessor {
   private readonly logger = new Logger(MessageProcessor.name);
+  private readonly typoProbability: number;
+  private readonly typoFixDelayMin: number;
+  private readonly typoFixDelayMax: number;
 
   constructor(
     private readonly conversationService: ConversationService,
     private readonly openaiService: OpenAIService,
     private readonly telegramService: TelegramService,
     private readonly rateLimitService: RateLimitService,
-  ) {}
+    private readonly configService: ConfigService,
+    private readonly factsService: FactsService,
+  ) {
+    this.typoProbability = this.configService.get<number>(
+      'typo.probability',
+      0.15,
+    );
+    this.typoFixDelayMin = this.configService.get<number>(
+      'typo.fixDelayMin',
+      1,
+    );
+    this.typoFixDelayMax = this.configService.get<number>(
+      'typo.fixDelayMax',
+      3,
+    );
+  }
+
+  /**
+   * Извлекает факты из разговора и сохраняет их
+   */
+  private async extractAndSaveFacts(
+    userId: string,
+    contextMessages: any[],
+  ): Promise<void> {
+    try {
+      // Извлекаем факты через OpenAI
+      const extractedFacts =
+        await this.openaiService.extractFacts(contextMessages);
+
+      if (extractedFacts.length > 0) {
+        // Сохраняем факты
+        await this.factsService.saveFactsForUser(userId, extractedFacts);
+        this.logger.log(
+          `Extracted and saved ${extractedFacts.length} facts for user ${userId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to extract and save facts for user ${userId}`,
+        error,
+      );
+    }
+  }
 
   /**
    * Пост-обработка текста: убирает точки в конце, случайно удаляет запятые
@@ -174,6 +222,17 @@ export class MessageProcessor {
         this.logger.debug('Added owner message context to AI prompt');
       }
 
+      // 4.25. Загружаем факты о пользователе и добавляем в контекст
+      const userFacts = await this.factsService.getFactsForUser(userId);
+      if (userFacts.length > 0) {
+        const factsContext = this.factsService.formatFactsForContext(userFacts);
+        contextMessages.push({
+          role: 'system',
+          content: factsContext,
+        });
+        this.logger.debug(`Added ${userFacts.length} user facts to AI context`);
+      }
+
       // 4.3. УМНАЯ ЗАДЕРЖКА: Ждем пока пользователь перестанет печатать + 5 секунд
       this.logger.log(
         `Waiting for user ${telegramId} to stop typing before responding...`,
@@ -262,8 +321,40 @@ export class MessageProcessor {
         await this.telegramService.setTyping(telegramId, true);
         await new Promise((resolve) => setTimeout(resolve, typingDurationMs));
 
-        // Отправить сообщение
-        await this.telegramService.sendMessage(telegramId, msg);
+        // Проверяем, нужно ли добавить опечатку
+        const typoResult = introduceTypo(msg, this.typoProbability);
+
+        if (typoResult.hasTypo && typoResult.originalText) {
+          // Отправляем сообщение с опечаткой
+          this.logger.debug(
+            `Sending message with typo: "${typoResult.text}" (original: "${typoResult.originalText}")`,
+          );
+          const messageId = await this.telegramService.sendMessage(
+            telegramId,
+            typoResult.text,
+          );
+
+          // Ждем случайное время перед исправлением
+          const fixDelay = getTypoFixDelay(
+            this.typoFixDelayMin,
+            this.typoFixDelayMax,
+          );
+          this.logger.debug(
+            `Waiting ${fixDelay}ms before fixing typo in message ${messageId}`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, fixDelay));
+
+          // Исправляем опечатку
+          this.logger.debug(`Fixing typo in message ${messageId}`);
+          await this.telegramService.editMessage(
+            telegramId,
+            messageId,
+            typoResult.originalText,
+          );
+        } else {
+          // Отправляем сообщение без опечатки
+          await this.telegramService.sendMessage(telegramId, msg);
+        }
 
         // Небольшая пауза между сообщениями (0.5-1.5 секунды)
         if (i < messages.length - 1) {
@@ -290,6 +381,11 @@ export class MessageProcessor {
 
       // 13. Проверить, нужна ли суммаризация
       await this.conversationService.summarizeConversation(conversation.id);
+
+      // 14. Извлечь факты из разговора (асинхронно, не блокируем ответ)
+      this.extractAndSaveFacts(userId, contextMessages).catch((err) => {
+        this.logger.error('Failed to extract facts', err);
+      });
 
       this.logger.log(`Successfully processed message job ${job.id}`);
       return { success: true };

@@ -11,6 +11,7 @@ import { ConversationService } from '../conversation/conversation.service';
 import { OwnerCommandsService } from '../conversation/owner-commands.service';
 import { MESSAGE_QUEUE } from '../queue/shared-queue.module';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
+import { calculateDelay, formatDelay } from '../utils/delay-calculator';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -19,6 +20,9 @@ export class TelegramService implements OnModuleInit {
   private readonly messageDelaySeconds: number;
   private readonly botName: string;
   private readonly ownerTelegramId?: string;
+  private readonly delayNormalProbability: number;
+  private readonly delayMediumProbability: number;
+  private readonly delayLongProbability: number;
 
   constructor(
     private readonly configService: ConfigService,
@@ -41,6 +45,19 @@ export class TelegramService implements OnModuleInit {
     this.botName = this.configService.get<string>('bot.name', 'канатик');
     this.ownerTelegramId = this.configService.get<string>(
       'bot.ownerTelegramId',
+    );
+
+    this.delayNormalProbability = this.configService.get<number>(
+      'delay.normalProbability',
+      0.8,
+    );
+    this.delayMediumProbability = this.configService.get<number>(
+      'delay.mediumProbability',
+      0.15,
+    );
+    this.delayLongProbability = this.configService.get<number>(
+      'delay.longProbability',
+      0.05,
     );
 
     // Инициализация MTProto клиента
@@ -73,8 +90,6 @@ export class TelegramService implements OnModuleInit {
     this.client.addEventHandler(async (event: NewMessageEvent) => {
       try {
         const message = event.message;
-
-        this.logger.log(message);
 
         // Обрабатываем команды управления ботом (исходящие сообщения)
         if (message.out) {
@@ -304,9 +319,24 @@ export class TelegramService implements OnModuleInit {
           isOwnerMessage,
         );
 
-        // Добавляем задачу в очередь с минимальной задержкой 2 секунды
-        // (реальная задержка будет больше - в процессоре ждем пока пользователь перестанет печатать)
-        const minDelaySeconds = 2;
+        // Вычисляем случайную задержку (для владельца всегда минимальная)
+        const isOwnerUser = Boolean(
+          this.ownerTelegramId &&
+            this.ownerTelegramId.length > 0 &&
+            telegramId.toString() === this.ownerTelegramId,
+        );
+        const delayResult = calculateDelay(
+          this.delayNormalProbability,
+          this.delayMediumProbability,
+          this.delayLongProbability,
+          isOwnerUser,
+        );
+
+        this.logger.log(
+          `Scheduling message processing with ${delayResult.delayType} delay: ${formatDelay(delayResult.delaySeconds)} (isOwner=${isOwnerUser})`,
+        );
+
+        // Добавляем задачу в очередь со случайной задержкой
         await this.messageQueue.add(
           'process-message',
           {
@@ -314,13 +344,9 @@ export class TelegramService implements OnModuleInit {
             telegramId: Number(sender.id),
           },
           {
-            delay: minDelaySeconds * 1000,
+            delay: delayResult.delayMs,
             jobId: `${user.id}-${Date.now()}`,
           },
-        );
-
-        this.logger.debug(
-          `Added message to queue with ${minDelaySeconds}s initial delay (will wait for typing to stop)`,
         );
 
         // Отмечаем сообщение как прочитанное через 0.5-1 секунду (быстро, как человек)
@@ -533,7 +559,21 @@ export class TelegramService implements OnModuleInit {
   }
 
   /**
+   * Устанавливает статус онлайн/оффлайн
+   * @param offline - true для оффлайн, false для онлайн
+   */
+  async updateStatus(offline: boolean = false): Promise<void> {
+    try {
+      await this.client.invoke(new Api.account.UpdateStatus({ offline }));
+    } catch (error) {
+      this.logger.error(`Failed to update status (offline=${offline})`, error);
+      // Не бросаем ошибку, это не критично
+    }
+  }
+
+  /**
    * Отмечает сообщения как прочитанные с задержкой (имитация чтения человеком)
+   * С вероятностью 20% показывает "в сети" без прочтения сообщений
    * @param telegramId - ID пользователя
    * @param minDelay - минимальная задержка в секундах (по умолчанию 3)
    * @param maxDelay - максимальная задержка в секундах (по умолчанию 5)
@@ -544,6 +584,37 @@ export class TelegramService implements OnModuleInit {
     maxDelay: number = 5,
   ): Promise<void> {
     try {
+      const seenWithoutReadProbability = this.configService.get<number>(
+        'readStatus.seenWithoutReadProbability',
+        0.2,
+      );
+
+      // С вероятностью 20% показываем "в сети" без прочтения
+      if (Math.random() < seenWithoutReadProbability) {
+        this.logger.debug(
+          `Showing "online" without reading messages for ${telegramId}`,
+        );
+
+        // Показываем "в сети"
+        await this.updateStatus(false);
+
+        // Ждем 5-30 секунд (как будто зашел, но отвлекся)
+        const onlineDelaySeconds = 5 + Math.random() * 25;
+        const onlineDelayMs = Math.floor(onlineDelaySeconds * 1000);
+        this.logger.debug(
+          `Staying online for ${Math.round(onlineDelaySeconds)}s without reading`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, onlineDelayMs));
+
+        // Уходим в оффлайн
+        await this.updateStatus(true);
+
+        // Ждем еще немного перед прочтением (1-5 секунд)
+        const beforeReadDelaySeconds = 1 + Math.random() * 4;
+        const beforeReadDelayMs = Math.floor(beforeReadDelaySeconds * 1000);
+        await new Promise((resolve) => setTimeout(resolve, beforeReadDelayMs));
+      }
+
       // Случайная задержка между min и max секундами
       const delaySeconds = Math.random() * (maxDelay - minDelay) + minDelay;
       const delayMs = Math.floor(delaySeconds * 1000);
@@ -589,12 +660,14 @@ export class TelegramService implements OnModuleInit {
 
   /**
    * Отправляет сообщение пользователю
+   * @returns ID отправленного сообщения
    */
-  async sendMessage(telegramId: number, text: string): Promise<void> {
+  async sendMessage(telegramId: number, text: string): Promise<number> {
     try {
-      await this.client.sendMessage(telegramId, {
+      const result = await this.client.sendMessage(telegramId, {
         message: text,
       });
+      return result.id;
     } catch (error) {
       this.logger.error(`Failed to send message to ${telegramId}`, error);
       throw error;

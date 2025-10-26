@@ -21,6 +21,7 @@ model User {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   conversations Conversation[]
+  facts         UserFact[]     // Факты о пользователе
 
   @@index([telegramId])
   @@map("users")
@@ -76,4 +77,19 @@ model PendingMessage {
   @@index([userId, processed])
   @@index([scheduledFor, processed])
   @@map("pending_messages")
+}
+
+// Факты о пользователях (дни рождения, планы, интересы и т.д.)
+model UserFact {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category  String // "birthday", "interests", "plans", "work", "relationships", "other"
+  fact      String   @db.Text // Сам факт, например "День рождения 15 мая"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([category])
+  @@map("user_facts")
 }

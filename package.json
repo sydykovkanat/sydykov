@@ -31,6 +31,8 @@
     "env:diff": "bash scripts/env-helper.sh diff",
     "env:validate": "bash scripts/env-helper.sh validate",
     "env:backup": "bash scripts/env-helper.sh backup",
+    "env:fetch": "bash scripts/env-backup.sh print",
+    "env:fetch-save": "bash scripts/env-backup.sh save",
     "deploy:local": "bash scripts/deploy.sh"
   },
   "dependencies": {

@@ -126,6 +126,53 @@ export class EnvironmentVariables {
   @IsOptional()
   RATE_LIMIT_WARNING_MESSAGE?: string = 'Я сейчас занят, чуть позже отвечу 🙏';
 
+  // Typo Configuration
+  @IsPositive()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  TYPO_PROBABILITY?: number = 0.15;
+
+  @IsInt()
+  @IsPositive()
+  @Min(1)
+  @Max(10)
+  @IsOptional()
+  TYPO_FIX_DELAY_MIN?: number = 1;
+
+  @IsInt()
+  @IsPositive()
+  @Min(1)
+  @Max(10)
+  @IsOptional()
+  TYPO_FIX_DELAY_MAX?: number = 3;
+
+  // Delay Configuration
+  @IsPositive()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  DELAY_NORMAL_PROBABILITY?: number = 0.8;
+
+  @IsPositive()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  DELAY_MEDIUM_PROBABILITY?: number = 0.15;
+
+  @IsPositive()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  DELAY_LONG_PROBABILITY?: number = 0.05;
+
+  // Read Status Configuration
+  @IsPositive()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  READ_SEEN_WITHOUT_READ_PROBABILITY?: number = 0.2;
+
   // Logging
   @IsEnum(LogLevel)
   @IsOptional()
@@ -192,6 +239,25 @@ export default () => ({
     warningMessage:
       process.env.RATE_LIMIT_WARNING_MESSAGE ||
       'Я сейчас занят, чуть позже отвечу 🙏',
+  },
+  typo: {
+    probability: parseFloat(process.env.TYPO_PROBABILITY || '0.15'),
+    fixDelayMin: parseInt(process.env.TYPO_FIX_DELAY_MIN || '1', 10),
+    fixDelayMax: parseInt(process.env.TYPO_FIX_DELAY_MAX || '3', 10),
+  },
+  delay: {
+    normalProbability: parseFloat(
+      process.env.DELAY_NORMAL_PROBABILITY || '0.80',
+    ),
+    mediumProbability: parseFloat(
+      process.env.DELAY_MEDIUM_PROBABILITY || '0.15',
+    ),
+    longProbability: parseFloat(process.env.DELAY_LONG_PROBABILITY || '0.05'),
+  },
+  readStatus: {
+    seenWithoutReadProbability: parseFloat(
+      process.env.READ_SEEN_WITHOUT_READ_PROBABILITY || '0.20',
+    ),
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',

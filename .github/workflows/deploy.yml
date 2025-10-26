@@ -27,6 +27,11 @@ jobs:
 
             cd ~/sydykov
 
+            echo "🔐 Creating .env file from GitHub Secret..."
+            cat > .env << 'ENV_FILE_EOF'
+            ${{ secrets.ENV_FILE }}
+            ENV_FILE_EOF
+
             echo "📥 Pulling latest changes..."
             git pull origin main
 

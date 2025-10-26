@@ -49,7 +49,9 @@ yarn docker:logs          # View container logs
 yarn env:check            # Check if all required env variables are set
 yarn env:diff             # Compare .env with .env.example
 yarn env:validate         # Validate .env format
-yarn env:backup           # Backup current .env file
+yarn env:backup           # Backup current .env file (local)
+yarn env:fetch            # Fetch .env from VPS (prints to stdout)
+yarn env:fetch-save       # Fetch .env from VPS and save to file
 
 # Deployment (on VPS)
 yarn deploy:local         # Run deployment script locally on VPS
@@ -72,6 +74,7 @@ This project uses **GitHub Actions** for automatic deployment to VPS.
    - `VPS_HOST`: VPS IP or domain
    - `VPS_USERNAME`: SSH username
    - `VPS_SSH_KEY`: Private SSH key
+   - `ENV_FILE`: Full content of your .env file (required for automatic .env management)
    - `VPS_PORT`: SSH port (optional, default 22)
 
 2. On VPS, clone repo and setup:
@@ -86,7 +89,17 @@ This project uses **GitHub Actions** for automatic deployment to VPS.
    pm2 save
    ```
 
-3. Push to `main` - automatic deploy!
+3. Push to `main` - automatic deploy! The `.env` file will be automatically created from the `ENV_FILE` secret.
+
+**Managing .env variables:**
+
+The `.env` file is automatically managed via GitHub Secrets:
+
+1. Fetch current .env from VPS: `yarn env:fetch` (set VPS_HOST and VPS_USERNAME env vars)
+2. Copy output and update GitHub Secret `ENV_FILE`
+3. Push to `main` or run workflow manually - .env updates automatically!
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
 
 **Manual deploy on VPS:**
 
@@ -98,7 +111,8 @@ This project uses **GitHub Actions** for automatic deployment to VPS.
 
 - [.github/workflows/deploy.yml](.github/workflows/deploy.yml) - GitHub Actions workflow
 - [scripts/deploy.sh](scripts/deploy.sh) - Deployment script
-- [scripts/env-helper.sh](scripts/env-helper.sh) - Environment management helper
+- [scripts/env-helper.sh](scripts/env-helper.sh) - Local environment management helper
+- [scripts/env-backup.sh](scripts/env-backup.sh) - Fetch .env from VPS for GitHub Secret sync
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Full deployment guide
 
 ## Architecture & Message Flow

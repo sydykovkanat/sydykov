@@ -157,4 +157,94 @@ export class OpenAIService implements OnModuleInit {
       throw error;
     }
   }
+
+  /**
+   * Извлекает факты о пользователе из разговора
+   * Возвращает массив фактов с категориями
+   */
+  async extractFacts(
+    messages: ChatMessage[],
+  ): Promise<Array<{ category: string; fact: string }>> {
+    try {
+      const factsPrompt: ChatMessage = {
+        role: 'system',
+        content: `Ты — ассистент, который анализирует разговоры и извлекает важные факты о пользователе.
+
+Категории фактов:
+- birthday: дни рождения (свои или близких)
+- interests: интересы, хобби
+- plans: планы на будущее
+- work: работа, учеба
+- relationships: отношения (семья, друзья)
+- other: другие важные факты
+
+Верни только НОВЫЕ факты (которые еще не были упомянуты ранее).
+Если новых фактов нет, верни пустой массив.
+
+Формат ответа: строгий JSON массив объектов с полями "category" и "fact".
+Пример: [{"category":"birthday","fact":"День рождения 15 мая"},{"category":"work","fact":"Работает фронтенд разработчиком в компании О!"}]
+
+Важно: отвечай ТОЛЬКО валидным JSON, без дополнительного текста.`,
+      };
+
+      // Конвертируем только последние 5-10 сообщений для анализа
+      const recentMessages = messages.slice(-10);
+      const messageTexts = recentMessages
+        .map((m) => {
+          const contentText =
+            typeof m.content === 'string'
+              ? m.content
+              : m.content
+                  .map((c) => (c.type === 'text' ? c.text : '[изображение]'))
+                  .join(' ');
+          return `${m.role}: ${contentText}`;
+        })
+        .join('\n');
+
+      const completion = await this.client.chat.completions.create({
+        model: this.model,
+        messages: [
+          factsPrompt,
+          {
+            role: 'user',
+            content: `Проанализируй разговор и извлеки факты:\n\n${messageTexts}`,
+          },
+        ] as ChatCompletionMessageParam[],
+        max_tokens: 500,
+        temperature: 0.3,
+      });
+
+      const responseContent = completion.choices[0]?.message?.content;
+
+      if (!responseContent) {
+        this.logger.warn('No response from OpenAI for facts extraction');
+        return [];
+      }
+
+      try {
+        // Парсим JSON ответ
+        const facts = JSON.parse(responseContent.trim());
+
+        if (!Array.isArray(facts)) {
+          this.logger.warn(
+            'Facts response is not an array, returning empty array',
+          );
+          return [];
+        }
+
+        this.logger.log(`Extracted ${facts.length} facts from conversation`);
+        return facts;
+      } catch (parseError) {
+        this.logger.error(
+          'Failed to parse facts JSON, returning empty array',
+          parseError,
+        );
+        this.logger.debug(`Raw response: ${responseContent}`);
+        return [];
+      }
+    } catch (error) {
+      this.logger.error('Failed to extract facts', error);
+      return [];
+    }
+  }
 }
