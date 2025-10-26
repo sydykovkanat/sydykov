@@ -1,0 +1,41 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            cd ~/sydykov
+
+            echo "📥 Pulling latest changes..."
+            git pull origin main
+
+            echo "📦 Installing dependencies..."
+            yarn install --frozen-lockfile
+
+            echo "🗄️ Running database migrations..."
+            npx prisma migrate deploy
+            npx prisma generate
+
+            echo "🔨 Building application..."
+            yarn build
+
+            echo "🔄 Restarting PM2..."
+            pm2 restart sydykov-bot || pm2 start dist/main.js --name sydykov-bot
+
+            echo "✅ Deployment completed!"
+            pm2 status sydykov-bot

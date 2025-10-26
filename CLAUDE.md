@@ -44,7 +44,62 @@ yarn auth                 # Generate session string (run once)
 yarn docker:up            # Start containers
 yarn docker:down          # Stop containers
 yarn docker:logs          # View container logs
+
+# Environment Management
+yarn env:check            # Check if all required env variables are set
+yarn env:diff             # Compare .env with .env.example
+yarn env:validate         # Validate .env format
+yarn env:backup           # Backup current .env file
+
+# Deployment (on VPS)
+yarn deploy:local         # Run deployment script locally on VPS
 ```
+
+## Deployment & CI/CD
+
+This project uses **GitHub Actions** for automatic deployment to VPS.
+
+**How it works:**
+
+1. Push to `main` branch triggers GitHub Actions workflow
+2. Workflow connects to VPS via SSH
+3. Pulls latest code, installs dependencies, runs migrations
+4. Builds project and restarts PM2
+
+**Setup:**
+
+1. Configure GitHub Secrets in repository settings:
+   - `VPS_HOST`: VPS IP or domain
+   - `VPS_USERNAME`: SSH username
+   - `VPS_SSH_KEY`: Private SSH key
+   - `VPS_PORT`: SSH port (optional, default 22)
+
+2. On VPS, clone repo and setup:
+
+   ```bash
+   cd ~
+   git clone <repo> sydykov
+   cd sydykov
+   yarn install
+   yarn build
+   pm2 start dist/main.js --name sydykov-bot
+   pm2 save
+   ```
+
+3. Push to `main` - automatic deploy!
+
+**Manual deploy on VPS:**
+
+```bash
+./scripts/deploy.sh
+```
+
+**Files:**
+
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) - GitHub Actions workflow
+- [scripts/deploy.sh](scripts/deploy.sh) - Deployment script
+- [scripts/env-helper.sh](scripts/env-helper.sh) - Environment management helper
+- [DEPLOYMENT.md](DEPLOYMENT.md) - Full deployment guide
 
 ## Architecture & Message Flow
 

@@ -26,7 +26,12 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "auth": "ts-node scripts/auth.ts"
+    "auth": "ts-node scripts/auth.ts",
+    "env:check": "bash scripts/env-helper.sh check",
+    "env:diff": "bash scripts/env-helper.sh diff",
+    "env:validate": "bash scripts/env-helper.sh validate",
+    "env:backup": "bash scripts/env-helper.sh backup",
+    "deploy:local": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@nestjs/bull": "^10.2.1",
