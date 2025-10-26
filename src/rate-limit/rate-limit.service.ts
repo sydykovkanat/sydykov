@@ -165,7 +165,6 @@ export class RateLimitService {
     const key = this.getTypingKey(telegramId);
     try {
       await this.redis.set(key, Date.now().toString(), 'EX', 10);
-      this.logger.debug(`User ${telegramId} is typing`);
     } catch (error) {
       this.logger.error(`Failed to set typing status for ${telegramId}`, error);
     }
@@ -195,7 +194,6 @@ export class RateLimitService {
     const key = this.getTypingKey(telegramId);
     try {
       await this.redis.del(key);
-      this.logger.debug(`User ${telegramId} stopped typing`);
     } catch (error) {
       this.logger.error(
         `Failed to clear typing status for ${telegramId}`,
@@ -205,7 +203,7 @@ export class RateLimitService {
   }
 
   /**
-   * Ждет пока пользователь перестанет печатать + 5 секунд
+   * Ждет пока пользователь перестанет печатать + небольшая задержка (1 сек)
    * Возвращает: true если дождались, false если timeout
    */
   async waitForUserToStopTyping(
@@ -225,25 +223,18 @@ export class RateLimitService {
       if (isTyping) {
         // Пользователь печатает - обновляем время последней проверки
         lastTypingCheck = Date.now();
-        this.logger.debug(`User ${telegramId} is still typing, waiting...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // проверяем каждую секунду
+        await new Promise((resolve) => setTimeout(resolve, 500)); // проверяем каждые 0.5 секунды
       } else {
         // Пользователь не печатает
         const timeSinceLastTyping = Date.now() - lastTypingCheck;
 
-        if (timeSinceLastTyping >= 5000) {
-          // Прошло 5 секунд с момента как перестал печатать
-          this.logger.debug(
-            `User ${telegramId} stopped typing 5+ seconds ago, proceeding`,
-          );
+        if (timeSinceLastTyping >= 1000) {
+          // Прошла 1 секунда с момента как перестал печатать - достаточно
+          this.logger.debug(`User ${telegramId} stopped typing, proceeding`);
           return true;
         } else {
-          // Еще не прошло 5 секунд, ждем
-          const remainingMs = 5000 - timeSinceLastTyping;
-          this.logger.debug(
-            `User ${telegramId} stopped typing, waiting ${Math.ceil(remainingMs / 1000)}s more...`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          // Еще не прошла секунда, ждем немного
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
     }

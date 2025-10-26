@@ -323,10 +323,9 @@ export class TelegramService implements OnModuleInit {
           `Added message to queue with ${minDelaySeconds}s initial delay (will wait for typing to stop)`,
         );
 
-        // Отмечаем сообщение как прочитанное через 2-3 секунды
+        // Отмечаем сообщение как прочитанное через 0.5-1 секунду (быстро, как человек)
         // Запускаем асинхронно - пока пользователь может печатать следующее
-        // Это естественно: ты видишь "прочитано" пока еще печатаешь следующее сообщение
-        this.markAsReadWithDelay(Number(sender.id), 2, 3).catch((err) => {
+        this.markAsReadWithDelay(Number(sender.id), 0.5, 1).catch((err) => {
           this.logger.error('Failed to mark as read with delay', err);
         });
       } catch (error) {
@@ -352,17 +351,11 @@ export class TelegramService implements OnModuleInit {
         const action = update.action;
 
         if (action instanceof Api.SendMessageTypingAction) {
-          this.logger.debug(`User ${telegramId} is typing...`);
-          // Отмечаем в Redis что пользователь печатает
+          // Отмечаем в Redis что пользователь печатает (без логов - слишком часто)
           await this.rateLimitService.setUserTyping(telegramId);
         } else if (action instanceof Api.SendMessageCancelAction) {
-          this.logger.debug(`User ${telegramId} stopped typing`);
-          // Очищаем статус
+          // Очищаем статус (без логов - слишком часто)
           await this.rateLimitService.clearUserTyping(telegramId);
-        } else if (action instanceof Api.SendMessageRecordAudioAction) {
-          this.logger.debug(`User ${telegramId} is recording audio...`);
-        } else if (action instanceof Api.SendMessageUploadPhotoAction) {
-          this.logger.debug(`User ${telegramId} is uploading a photo...`);
         }
       } catch (error) {
         this.logger.error('Error handling typing status', error);
@@ -532,7 +525,6 @@ export class TelegramService implements OnModuleInit {
             action: new Api.SendMessageTypingAction(),
           }),
         );
-        this.logger.debug(`Set typing status for ${telegramId}`);
       }
     } catch (error) {
       this.logger.error(`Failed to set typing status for ${telegramId}`, error);
@@ -556,10 +548,6 @@ export class TelegramService implements OnModuleInit {
       const delaySeconds = Math.random() * (maxDelay - minDelay) + minDelay;
       const delayMs = Math.floor(delaySeconds * 1000);
 
-      this.logger.debug(
-        `Waiting ${(delayMs / 1000).toFixed(2)}s before marking as read for ${telegramId}`,
-      );
-
       // Ждем случайное время
       await new Promise((resolve) => setTimeout(resolve, delayMs));
 
@@ -570,7 +558,6 @@ export class TelegramService implements OnModuleInit {
           maxId: 0, // 0 означает "все сообщения"
         }),
       );
-      this.logger.debug(`Marked messages as read for ${telegramId}`);
     } catch (error) {
       this.logger.error(
         `Failed to mark messages as read for ${telegramId}`,
@@ -591,7 +578,6 @@ export class TelegramService implements OnModuleInit {
           maxId: 0, // 0 означает "все сообщения"
         }),
       );
-      this.logger.debug(`Marked messages as read for ${telegramId}`);
     } catch (error) {
       this.logger.error(
         `Failed to mark messages as read for ${telegramId}`,
@@ -609,7 +595,6 @@ export class TelegramService implements OnModuleInit {
       await this.client.sendMessage(telegramId, {
         message: text,
       });
-      this.logger.log(`Sent message to ${telegramId}`);
     } catch (error) {
       this.logger.error(`Failed to send message to ${telegramId}`, error);
       throw error;
@@ -636,7 +621,6 @@ export class TelegramService implements OnModuleInit {
         message: messageId,
         text: text,
       });
-      this.logger.log(`Edited message ${messageId} in chat ${telegramId}`);
     } catch (error) {
       this.logger.error(
         `Failed to edit message ${messageId} in chat ${telegramId}`,
@@ -664,9 +648,6 @@ export class TelegramService implements OnModuleInit {
           msgId: messageId,
           reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
         }),
-      );
-      this.logger.log(
-        `Sent reaction ${emoji} to message ${messageId} for ${telegramId}`,
       );
     } catch (error) {
       this.logger.error(

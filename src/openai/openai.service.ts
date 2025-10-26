@@ -53,12 +53,23 @@ export class OpenAIService implements OnModuleInit {
 
   /**
    * Генерирует ответ на основе контекста разговора
+   * @param messages - история сообщений
+   * @param userName - имя пользователя (опционально)
    */
-  async generateResponse(messages: ChatMessage[]): Promise<AIResponse> {
+  async generateResponse(
+    messages: ChatMessage[],
+    userName?: string,
+  ): Promise<AIResponse> {
     try {
+      // Формируем системный промпт с именем пользователя (если есть)
+      let systemPromptContent = this.baseSystemPrompt;
+      if (userName) {
+        systemPromptContent += `\n\nТЫ ОБЩАЕШЬСЯ С: ${userName}`;
+      }
+
       const systemMessage: ChatMessage = {
         role: 'system',
-        content: this.baseSystemPrompt,
+        content: systemPromptContent,
       };
 
       // Детальное логирование контекста

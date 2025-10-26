@@ -215,22 +215,35 @@ export class MessageProcessor {
         );
       }
 
-      // 5. Сформировать промпт для OpenAI и получить ответ
-      this.logger.debug(`Sending ${contextMessages.length} messages to OpenAI`);
-      const aiResponse =
-        await this.openaiService.generateResponse(contextMessages);
+      // 5. Получить информацию о пользователе для передачи имени
+      const user = await this.conversationService.getUserById(userId);
+      const userName = user?.firstName || undefined;
 
-      // 6. Пост-обработка текста (убираем точки, случайно удаляем запятые)
+      if (userName) {
+        this.logger.debug(`User name: ${userName}`);
+      }
+
+      // 6. Показываем "печатает..." пока генерируем ответ (более естественно)
+      await this.telegramService.setTyping(telegramId, true);
+
+      // 7. Сформировать промпт для OpenAI и получить ответ
+      this.logger.debug(`Sending ${contextMessages.length} messages to OpenAI`);
+      const aiResponse = await this.openaiService.generateResponse(
+        contextMessages,
+        userName,
+      );
+
+      // 8. Пост-обработка текста (убираем точки, случайно удаляем запятые)
       const processedText = this.postProcessText(aiResponse.content);
 
-      // 7. Разделяем на несколько сообщений (как люди пишут)
+      // 9. Разделяем на несколько сообщений (как люди пишут)
       const messages = this.splitIntoMessages(processedText);
 
       this.logger.debug(
         `Generated response: ${aiResponse.content.length} chars, split into ${messages.length} message(s)`,
       );
 
-      // 8. Отправляем каждое сообщение с реалистичными задержками
+      // 10. Отправляем каждое сообщение с реалистичными задержками
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
 
@@ -262,7 +275,7 @@ export class MessageProcessor {
         }
       }
 
-      // 9. Сохранить все сообщения в БД (объединяем обратно для истории)
+      // 11. Сохранить все сообщения в БД (объединяем обратно для истории)
       const fullResponse = messages.join('\n');
       await this.conversationService.saveMessage(
         conversation.id,
@@ -270,12 +283,12 @@ export class MessageProcessor {
         fullResponse,
       );
 
-      // 10. Пометить pending сообщения как обработанные (только те что остались)
+      // 12. Пометить pending сообщения как обработанные (только те что остались)
       await this.conversationService.markPendingMessagesAsProcessed(
         stillPendingIds,
       );
 
-      // 11. Проверить, нужна ли суммаризация
+      // 13. Проверить, нужна ли суммаризация
       await this.conversationService.summarizeConversation(conversation.id);
 
       this.logger.log(`Successfully processed message job ${job.id}`);
