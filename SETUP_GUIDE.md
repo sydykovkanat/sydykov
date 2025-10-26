@@ -16,7 +16,7 @@ This guide will help you set up the Telegram userbot using MTProto.
 2. Login with your phone number
 3. Click "API development tools"
 4. Fill in the form:
-   - App title: `sydykov-bot` (or any name)
+   - App title: `sydykov` (or any name)
    - Short name: `sydykov` (or any short name)
    - Platform: Other
 5. Copy **api_id** and **api_hash**
@@ -160,7 +160,7 @@ For production, use PM2:
 npm install -g pm2
 
 # Start the app
-pm2 start dist/main.js --name sydykov-bot
+pm2 start dist/main.js --name sydykov
 
 # Enable auto-start on system reboot
 pm2 startup

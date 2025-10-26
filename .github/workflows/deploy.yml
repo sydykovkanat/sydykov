@@ -19,6 +19,12 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
+            # Load Node.js environment
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$HOME/.profile" ] && \. "$HOME/.profile"
+            [ -s "$HOME/.bashrc" ] && \. "$HOME/.bashrc"
+
             cd ~/sydykov
 
             echo "📥 Pulling latest changes..."
@@ -35,7 +41,7 @@ jobs:
             yarn build
 
             echo "🔄 Restarting PM2..."
-            pm2 restart sydykov-bot || pm2 start dist/main.js --name sydykov-bot
+            pm2 restart sydykov || pm2 start dist/main.js --name sydykov
 
             echo "✅ Deployment completed!"
-            pm2 status sydykov-bot
+            pm2 status sydykov

@@ -153,7 +153,7 @@ npx prisma migrate deploy
 npm install -g pm2
 
 # Запустить приложение
-pm2 start dist/main.js --name sydykov-bot
+pm2 start dist/main.js --name sydykov
 
 # Автозапуск при перезагрузке
 pm2 startup
@@ -164,14 +164,14 @@ pm2 save
 
 ```bash
 # Build образа
-docker build -t sydykov-bot .
+docker build -t sydykov .
 
 # Запуск контейнера
 docker run -d \
-  --name sydykov-bot \
+  --name sydykov \
   --env-file .env \
   -p 8000:8000 \
-  sydykov-bot
+  sydykov
 ```
 
 ## Логи и мониторинг
@@ -181,7 +181,7 @@ docker run -d \
 yarn start:dev
 
 # Просмотр логов PM2
-pm2 logs sydykov-bot
+pm2 logs sydykov
 
 # Мониторинг PM2
 pm2 monit

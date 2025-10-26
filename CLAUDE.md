@@ -82,7 +82,7 @@ This project uses **GitHub Actions** for automatic deployment to VPS.
    cd sydykov
    yarn install
    yarn build
-   pm2 start dist/main.js --name sydykov-bot
+   pm2 start dist/main.js --name sydykov
    pm2 save
    ```
 
@@ -286,4 +286,4 @@ Configuration is validated via [config/configuration.ts](src/config/configuratio
 
 **Graceful Shutdown**: Telegram client handles SIGINT/SIGTERM for clean disconnection.
 
-**Production Deployment**: Recommended to use PM2 (`pm2 start dist/main.js --name sydykov-bot`) or Docker. Make sure to keep session string secure in production.
+**Production Deployment**: Recommended to use PM2 (`pm2 start dist/main.js --name sydykov`) or Docker. Make sure to keep session string secure in production.

@@ -57,7 +57,7 @@ nano ~/sydykov/.env
 yarn build
 npx prisma migrate deploy
 npx prisma generate
-pm2 start dist/main.js --name sydykov-bot
+pm2 start dist/main.js --name sydykov
 pm2 save
 pm2 startup
 ```
@@ -218,16 +218,16 @@ nano .env
 
 ```bash
 # Проверить статус
-pm2 status sydykov-bot
+pm2 status sydykov
 
 # Посмотреть логи
-pm2 logs sydykov-bot
+pm2 logs sydykov
 
 # Перезапустить
-pm2 restart sydykov-bot
+pm2 restart sydykov
 
 # Остановить
-pm2 stop sydykov-bot
+pm2 stop sydykov
 
 # Мониторинг
 pm2 monit
@@ -269,8 +269,8 @@ Permission denied (publickey)
 ```bash
 # На VPS
 cd ~/sydykov
-pm2 delete sydykov-bot
-pm2 start dist/main.js --name sydykov-bot
+pm2 delete sydykov
+pm2 start dist/main.js --name sydykov
 pm2 save
 ```
 
@@ -281,7 +281,56 @@ pm2 save
 cd ~/sydykov
 npx prisma migrate deploy
 npx prisma generate
-pm2 restart sydykov-bot
+pm2 restart sydykov
+```
+
+### Ошибка "command not found" (yarn, node, pm2)
+
+```
+bash: line 7: yarn: command not found
+bash: line 17: pm2: command not found
+```
+
+**Причина:** SSH сессия не загружает PATH для Node.js/npm/yarn.
+
+**Решение 1** (уже в скриптах):
+Скрипты уже обновлены и загружают окружение. Просто запуш изменения:
+
+```bash
+git add .
+git commit -m "fix: update deployment scripts"
+git push origin main
+```
+
+**Решение 2** (если проблема остается):
+На VPS проверь где установлен Node.js:
+
+```bash
+# Подключись к VPS
+ssh root@your-vps-ip
+
+# Проверь Node.js
+which node
+which npm
+which yarn
+which pm2
+
+# Если используешь nvm
+source ~/.nvm/nvm.sh
+nvm use node
+
+# Если установлено глобально
+echo $PATH
+```
+
+**Решение 3** (установить заново):
+
+```bash
+# На VPS - установка через nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+source ~/.bashrc
+nvm install --lts
+npm install -g yarn pm2
 ```
 
 ---

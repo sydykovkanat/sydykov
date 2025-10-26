@@ -2,6 +2,12 @@
 
 set -e # Exit on any error
 
+# Load Node.js environment (for nvm or other node managers)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$HOME/.profile" ] && \. "$HOME/.profile"
+[ -s "$HOME/.bashrc" ] && \. "$HOME/.bashrc"
+
 echo "🚀 Starting deployment..."
 
 # Colors for output
@@ -11,7 +17,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Configuration
-APP_NAME="sydykov-bot"
+APP_NAME="sydykov"
 APP_DIR="$HOME/sydykov"
 
 cd "$APP_DIR"
