@@ -640,13 +640,12 @@ export class TelegramService implements OnModuleInit {
     text: string,
   ): Promise<void> {
     try {
-      await this.client.invoke(
-        new Api.messages.EditMessage({
-          peer: telegramId,
-          id: messageId,
-          message: text,
-        }),
-      );
+      // Используем высокоуровневый метод editMessage вместо invoke
+      // Он автоматически обрабатывает резолюцию entity
+      await this.client.editMessage(telegramId, {
+        message: messageId,
+        text: text,
+      });
       this.logger.log(`Edited message ${messageId} in chat ${telegramId}`);
     } catch (error) {
       this.logger.error(
