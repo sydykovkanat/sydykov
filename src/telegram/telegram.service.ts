@@ -8,6 +8,7 @@ import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
 
 import { ConversationService } from '../conversation/conversation.service';
+import { OwnerCommandsService } from '../conversation/owner-commands.service';
 import { MESSAGE_QUEUE } from '../queue/shared-queue.module';
 import { RateLimitService } from '../rate-limit/rate-limit.service';
 
@@ -16,10 +17,13 @@ export class TelegramService implements OnModuleInit {
   private readonly logger = new Logger(TelegramService.name);
   private client: TelegramClient;
   private readonly messageDelaySeconds: number;
+  private readonly botName: string;
+  private readonly ownerTelegramId?: string;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly conversationService: ConversationService,
+    private readonly ownerCommandsService: OwnerCommandsService,
     private readonly rateLimitService: RateLimitService,
     @InjectQueue(MESSAGE_QUEUE) private readonly messageQueue: Queue,
   ) {
@@ -32,6 +36,11 @@ export class TelegramService implements OnModuleInit {
     this.messageDelaySeconds = this.configService.get<number>(
       'messageProcessing.delaySeconds',
       10,
+    );
+
+    this.botName = this.configService.get<string>('bot.name', 'канатик');
+    this.ownerTelegramId = this.configService.get<string>(
+      'bot.ownerTelegramId',
     );
 
     // Инициализация MTProto клиента
@@ -64,6 +73,8 @@ export class TelegramService implements OnModuleInit {
     this.client.addEventHandler(async (event: NewMessageEvent) => {
       try {
         const message = event.message;
+
+        this.logger.log(message);
 
         // Обрабатываем команды управления ботом (исходящие сообщения)
         if (message.out) {
@@ -201,7 +212,95 @@ export class TelegramService implements OnModuleInit {
           return;
         }
 
+        // Проверяем owner commands для Saved Messages (когда пользователь пишет себе)
+        let isOwnerMessage = false;
+        if (this.ownerTelegramId && messageText) {
+          // Проверяем, что это сообщение в Saved Messages (savedPeerId присутствует)
+          const savedPeerId = (message as any).savedPeerId;
+          if (savedPeerId && savedPeerId instanceof Api.PeerUser) {
+            const savedUserId = BigInt(savedPeerId.userId.toString());
+
+            // Если savedPeerId === OWNER_TELEGRAM_ID, это сообщение владельца себе
+            if (savedUserId.toString() === this.ownerTelegramId) {
+              this.logger.debug(
+                'Checking for owner commands in Saved Messages...',
+              );
+
+              const commandResult =
+                await this.ownerCommandsService.handleOwnerCommand(
+                  savedUserId, // ID владельца
+                  telegramId, // ID целевого пользователя (в Saved Messages это всегда владелец)
+                  messageText,
+                );
+
+              if (commandResult.isCommand && commandResult.response) {
+                this.logger.log(
+                  `Processing owner command in Saved Messages: ${messageText.substring(0, 50)}...`,
+                );
+
+                // Редактируем сообщение с ответом
+                await this.editMessage(
+                  Number(sender.id),
+                  messageId,
+                  commandResult.response,
+                );
+
+                // Отмечаем как прочитанное
+                await this.markAsRead(Number(sender.id));
+
+                // НЕ сохраняем в очередь, НЕ обрабатываем через AI
+                return;
+              }
+
+              // Флаг isOwnerMessage для передачи в AI
+              isOwnerMessage = commandResult.isOwnerMessage;
+            } else {
+              this.logger.debug(
+                `Saved message from non-owner user ${savedUserId}, processing normally`,
+              );
+            }
+          } else {
+            // Обычный приватный чат - проверяем, не владелец ли это
+            this.logger.debug(
+              `Normal private chat message from ${telegramId}, checking for owner commands`,
+            );
+
+            // Проверяем owner commands в обычных чатах
+            const commandResult =
+              await this.ownerCommandsService.handleOwnerCommand(
+                BigInt(sender.id.toString()), // ID отправителя (может быть владелец)
+                telegramId, // ID пользователя в чате (целевой пользователь)
+                messageText,
+              );
+
+            if (commandResult.isCommand && commandResult.response) {
+              this.logger.log(
+                `Processing owner command in chat: ${messageText.substring(0, 50)}...`,
+              );
+
+              // Редактируем сообщение с ответом
+              await this.editMessage(
+                Number(sender.id),
+                messageId,
+                commandResult.response,
+              );
+
+              // Отмечаем как прочитанное
+              await this.markAsRead(Number(sender.id));
+
+              // НЕ сохраняем в очередь, НЕ обрабатываем через AI
+              return;
+            }
+
+            // Флаг isOwnerMessage для передачи в AI
+            isOwnerMessage = commandResult.isOwnerMessage;
+          }
+        }
+
         // Сохраняем сообщение как pending
+        this.logger.debug(
+          `Saving pending message for ${telegramId}, isOwnerMessage=${isOwnerMessage}`,
+        );
         await this.conversationService.savePendingMessage(
           user.id,
           telegramId,
@@ -210,9 +309,12 @@ export class TelegramService implements OnModuleInit {
           this.messageDelaySeconds,
           [], // imageUrls deprecated
           finalImageBase64,
+          isOwnerMessage,
         );
 
-        // Добавляем задачу в очередь с задержкой
+        // Добавляем задачу в очередь с минимальной задержкой 2 секунды
+        // (реальная задержка будет больше - в процессоре ждем пока пользователь перестанет печатать)
+        const minDelaySeconds = 2;
         await this.messageQueue.add(
           'process-message',
           {
@@ -220,24 +322,60 @@ export class TelegramService implements OnModuleInit {
             telegramId: Number(sender.id),
           },
           {
-            delay: this.messageDelaySeconds * 1000,
+            delay: minDelaySeconds * 1000,
             jobId: `${user.id}-${Date.now()}`,
           },
         );
 
         this.logger.debug(
-          `Added message to queue with ${this.messageDelaySeconds}s delay`,
+          `Added message to queue with ${minDelaySeconds}s initial delay (will wait for typing to stop)`,
         );
 
-        // Отмечаем сообщение как прочитанное с задержкой 3-5 секунд
-        // Запускаем асинхронно, не блокируя основной поток
-        this.markAsReadWithDelay(Number(sender.id), 3, 5).catch((err) => {
+        // Отмечаем сообщение как прочитанное через 2-3 секунды
+        // Запускаем асинхронно - пока пользователь может печатать следующее
+        // Это естественно: ты видишь "прочитано" пока еще печатаешь следующее сообщение
+        this.markAsReadWithDelay(Number(sender.id), 2, 3).catch((err) => {
           this.logger.error('Failed to mark as read with delay', err);
         });
       } catch (error) {
         this.logger.error('Error handling message', error);
       }
     }, new NewMessage({}));
+
+    // Обработчик события "печатает..." (UpdateUserTyping)
+    this.client.addEventHandler(async (update: any) => {
+      try {
+        // Проверяем что это UpdateUserTyping
+        if (!(update instanceof Api.UpdateUserTyping)) {
+          return;
+        }
+
+        // Получаем ID пользователя
+        const userId = update.userId;
+        if (!userId) return;
+
+        const telegramId = BigInt(userId.toString());
+
+        // Проверяем тип действия (typing, recording voice, etc.)
+        const action = update.action;
+
+        if (action instanceof Api.SendMessageTypingAction) {
+          this.logger.debug(`User ${telegramId} is typing...`);
+          // Отмечаем в Redis что пользователь печатает
+          await this.rateLimitService.setUserTyping(telegramId);
+        } else if (action instanceof Api.SendMessageCancelAction) {
+          this.logger.debug(`User ${telegramId} stopped typing`);
+          // Очищаем статус
+          await this.rateLimitService.clearUserTyping(telegramId);
+        } else if (action instanceof Api.SendMessageRecordAudioAction) {
+          this.logger.debug(`User ${telegramId} is recording audio...`);
+        } else if (action instanceof Api.SendMessageUploadPhotoAction) {
+          this.logger.debug(`User ${telegramId} is uploading a photo...`);
+        }
+      } catch (error) {
+        this.logger.error('Error handling typing status', error);
+      }
+    });
 
     // Graceful shutdown
     const shutdown = async () => {
@@ -251,25 +389,17 @@ export class TelegramService implements OnModuleInit {
   }
 
   /**
-   * Обрабатывает команды управления ботом (стоп/продолжай Канатик)
+   * Обрабатывает исходящие сообщения: отменяет автоответ + owner commands
    */
   private async handleControlCommands(message: any): Promise<void> {
     try {
-      const text = (message.text || '').trim().toLowerCase();
-
-      this.logger.debug(`Checking outgoing message: "${text}"`);
-
-      // Проверяем команды
-      if (!text.includes('канатик')) {
-        return;
-      }
-
-      this.logger.debug(`Found 'канатик' in message, checking chat type...`);
+      const text: string = (message.text || '').trim();
+      const lowerText = text.toLowerCase();
 
       // Проверяем, что это приватный чат
       const peerId = message.peerId;
       if (!peerId || !(peerId instanceof Api.PeerUser)) {
-        this.logger.debug(`Not a private chat, ignoring`);
+        this.logger.debug(`Outgoing message not in private chat, ignoring`);
         return;
       }
 
@@ -277,28 +407,126 @@ export class TelegramService implements OnModuleInit {
       const chatId = peerId.userId;
       const telegramId = BigInt(chatId.toString());
 
+      this.logger.debug(
+        `Outgoing message to ${telegramId}: "${text.substring(0, 50)}..."`,
+      );
+
+      // ===== ВАЖНО: Отменяем автоответ при любом исходящем сообщении =====
+      // Если владелец сам написал сообщение, значит он сам отвечает - отменяем автоответ
+      try {
+        // Ищем pending сообщения по telegramId
+        const pendingMessages =
+          await this.conversationService.findPendingMessagesByTelegramId(
+            telegramId,
+          );
+
+        if (pendingMessages.length > 0) {
+          this.logger.log(
+            `Owner sent message to ${telegramId}, cancelling ${pendingMessages.length} pending auto-responses`,
+          );
+
+          const pendingIds = pendingMessages.map((msg) => msg.id);
+          await this.conversationService.markPendingMessagesAsProcessed(
+            pendingIds,
+          );
+        }
+
+        // ===== ВАЖНО: Сохраняем исходящее сообщение владельца в БД =====
+        // Чтобы GPT видел контекст - что владелец уже ответил
+        if (text) {
+          const user = await this.conversationService.findOrCreateUser(
+            telegramId,
+            undefined, // username неизвестен
+            undefined, // firstName неизвестен
+            undefined, // lastName неизвестен
+          );
+
+          const conversation =
+            await this.conversationService.findOrCreateConversation(user.id);
+
+          // Сохраняем как assistant (ответ бота)
+          await this.conversationService.saveMessage(
+            conversation.id,
+            'assistant',
+            text,
+          );
+
+          this.logger.debug(
+            `Saved outgoing message to DB for context: "${text.substring(0, 50)}..."`,
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to cancel auto-response for ${telegramId}`,
+          error,
+        );
+        // Не бросаем ошибку, продолжаем обработку команд
+      }
+
+      // ===== Проверяем owner commands (только если есть botName в сообщении) =====
+      if (!lowerText.includes(this.botName.toLowerCase())) {
+        return; // Нет botName - это обычное сообщение, мы уже отменили автоответ
+      }
+
+      this.logger.debug(
+        `Found '${this.botName}' in message, checking for owner commands...`,
+      );
+
       this.logger.debug(`Processing command for chat ${telegramId}`);
 
-      // Находим пользователя в БД
-      const user = await this.conversationService.findOrCreateUser(telegramId);
+      // Проверяем owner commands (если OWNER_TELEGRAM_ID настроен и это наше сообщение владельцу)
+      if (this.ownerTelegramId) {
+        const fromId = message.fromId;
+        const myTelegramId =
+          fromId && fromId instanceof Api.PeerUser
+            ? BigInt(fromId.userId.toString())
+            : null;
 
-      if (text.includes('стоп')) {
-        // Команда "стоп Канатик"
-        this.logger.log(`Processing "стоп Канатик" command for ${telegramId}`);
-        await this.conversationService.setConversationIgnored(user.id, true);
-        this.logger.log(
-          `✅ Conversation with ${telegramId} added to ignore list`,
-        );
-      } else if (text.includes('продолжай')) {
-        // Команда "продолжай Канатик"
-        this.logger.log(
-          `Processing "продолжай Канатик" command for ${telegramId}`,
-        );
-        await this.conversationService.setConversationIgnored(user.id, false);
-        this.logger.log(
-          `✅ Conversation with ${telegramId} removed from ignore list`,
-        );
+        // Если это сообщение от владельца (myTelegramId === OWNER_TELEGRAM_ID)
+        if (myTelegramId?.toString() === this.ownerTelegramId) {
+          this.logger.debug('Checking for owner commands...');
+
+          const commandResult =
+            await this.ownerCommandsService.handleOwnerCommand(
+              myTelegramId, // ID владельца (для проверки прав)
+              telegramId, // ID целевого пользователя (для команд стоп/продолжай)
+              text,
+            );
+
+          if (commandResult.isCommand && commandResult.response) {
+            this.logger.log(
+              `Processing owner command: ${text.substring(0, 50)}...`,
+            );
+
+            // Редактируем сообщение владельца с ответом
+            await this.editMessage(
+              Number(chatId),
+              message.id,
+              commandResult.response,
+            );
+
+            return; // Не обрабатываем как "стоп/продолжай"
+          }
+
+          // Если это owner message (с botName), но неизвестная команда - не продолжаем обработку стоп/продолжай
+          if (commandResult.isOwnerMessage) {
+            this.logger.debug(
+              'Unknown owner command, skipping stop/continue check',
+            );
+            return;
+          }
+        }
       }
+
+      // Все команды (включая стоп/продолжай) теперь обрабатываются через owner commands
+      // Эта ветка достигается только если:
+      // 1. В сообщении есть botName
+      // 2. Это НЕ owner command (или команда неизвестна)
+      // 3. Это НЕ owner message
+      // В этом случае просто игнорируем сообщение
+      this.logger.debug(
+        `Message contains bot name but not processed as command`,
+      );
     } catch (error) {
       this.logger.error('❌ Error handling control commands', error);
     }
@@ -396,6 +624,35 @@ export class TelegramService implements OnModuleInit {
       this.logger.log(`Sent message to ${telegramId}`);
     } catch (error) {
       this.logger.error(`Failed to send message to ${telegramId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Редактирует сообщение
+   * @param telegramId - ID пользователя (чата)
+   * @param messageId - ID сообщения для редактирования
+   * @param text - Новый текст сообщения
+   */
+  async editMessage(
+    telegramId: number,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.client.invoke(
+        new Api.messages.EditMessage({
+          peer: telegramId,
+          id: messageId,
+          message: text,
+        }),
+      );
+      this.logger.log(`Edited message ${messageId} in chat ${telegramId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to edit message ${messageId} in chat ${telegramId}`,
+        error,
+      );
       throw error;
     }
   }

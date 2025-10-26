@@ -109,6 +109,28 @@ yarn docker:logs          # View container logs
 - Logic defined in [base.prompt.txt](base.prompt.txt)
 - Reactions are sent via MTProto API and saved to DB as `[Реакция: 👍]` for context
 
+**Personalized Contexts**: Custom context for each user to adjust AI behavior:
+
+- Each user has optional `customContext` field in database
+- Context can be set via config file ([user-contexts.config.ts](src/config/user-contexts.config.ts)) or owner commands
+- Context is appended to system prompt when generating responses
+- Examples: "This is my manager - be formal", "This is my friend - be casual"
+- Automatically applied when creating new users or during message processing
+
+**Owner Commands**: Special commands for bot owner (configurable via `OWNER_TELEGRAM_ID`):
+
+- Bot name trigger (default "канатик") - messages containing this from owner are treated as commands
+- Commands are executed by editing the owner's message with the response (seamless UX)
+- Available commands:
+  - `канатик, айди` - get Telegram ID
+  - `канатик, информация` - view user context
+  - `канатик, статистика` - message statistics
+  - `канатик, установить контекст [text]` - set custom context
+  - `канатик, очистить контекст` - clear custom context
+  - `канатик, игнор-лист` - list ignored conversations
+  - `канатик, команды` - list all commands
+- Implementation: [owner-commands.service.ts](src/conversation/owner-commands.service.ts)
+
 ## Module Structure
 
 - **AppModule** ([app.module.ts](src/app.module.ts)): Root module, imports all others
@@ -162,6 +184,11 @@ Required environment variables (see `.env.example`):
 - `TELEGRAM_SESSION_STRING`: Generate using `yarn auth` script
 - `TELEGRAM_PHONE_NUMBER`: (Optional) Phone number for initial auth
 
+### Bot Owner Configuration (Optional)
+
+- `BOT_NAME`: Bot name for owner commands (default: "канатик")
+- `OWNER_TELEGRAM_ID`: Your Telegram ID to enable owner commands (leave empty to disable)
+
 ### Other Configuration
 
 - `OPENAI_API_KEY`: OpenAI API key
@@ -182,7 +209,13 @@ Configuration is validated via [config/configuration.ts](src/config/configuratio
 2. Add `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` to `.env`
 3. Run `yarn auth` to authenticate and get session string
 4. Add the session string to `.env` as `TELEGRAM_SESSION_STRING`
-5. Start the application with `yarn start:dev`
+5. (Optional) Enable owner commands:
+   - Start the app and send yourself a message
+   - Use `канатик, айди` to get your Telegram ID
+   - Add your ID to `.env` as `OWNER_TELEGRAM_ID`
+   - Restart the app
+6. (Optional) Set up user contexts in [src/config/user-contexts.config.ts](src/config/user-contexts.config.ts)
+7. Start the application with `yarn start:dev`
 
 ## Important Implementation Details
 

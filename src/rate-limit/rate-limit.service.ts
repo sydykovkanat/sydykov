@@ -158,6 +158,111 @@ export class RateLimitService {
   }
 
   /**
+   * Отмечает что пользователь начал печатать
+   * TTL: 10 секунд (автоматически сбрасывается если не обновляется)
+   */
+  async setUserTyping(telegramId: bigint): Promise<void> {
+    const key = this.getTypingKey(telegramId);
+    try {
+      await this.redis.set(key, Date.now().toString(), 'EX', 10);
+      this.logger.debug(`User ${telegramId} is typing`);
+    } catch (error) {
+      this.logger.error(`Failed to set typing status for ${telegramId}`, error);
+    }
+  }
+
+  /**
+   * Проверяет, печатает ли пользователь сейчас
+   */
+  async isUserTyping(telegramId: bigint): Promise<boolean> {
+    const key = this.getTypingKey(telegramId);
+    try {
+      const value = await this.redis.get(key);
+      return value !== null;
+    } catch (error) {
+      this.logger.error(
+        `Failed to check typing status for ${telegramId}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Очищает статус "печатает"
+   */
+  async clearUserTyping(telegramId: bigint): Promise<void> {
+    const key = this.getTypingKey(telegramId);
+    try {
+      await this.redis.del(key);
+      this.logger.debug(`User ${telegramId} stopped typing`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to clear typing status for ${telegramId}`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Ждет пока пользователь перестанет печатать + 5 секунд
+   * Возвращает: true если дождались, false если timeout
+   */
+  async waitForUserToStopTyping(
+    telegramId: bigint,
+    maxWaitMs: number = 120000, // максимум 2 минуты ждем
+  ): Promise<boolean> {
+    const startTime = Date.now();
+    let lastTypingCheck = Date.now();
+
+    this.logger.debug(
+      `Waiting for user ${telegramId} to stop typing (max ${maxWaitMs}ms)`,
+    );
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const isTyping = await this.isUserTyping(telegramId);
+
+      if (isTyping) {
+        // Пользователь печатает - обновляем время последней проверки
+        lastTypingCheck = Date.now();
+        this.logger.debug(`User ${telegramId} is still typing, waiting...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // проверяем каждую секунду
+      } else {
+        // Пользователь не печатает
+        const timeSinceLastTyping = Date.now() - lastTypingCheck;
+
+        if (timeSinceLastTyping >= 5000) {
+          // Прошло 5 секунд с момента как перестал печатать
+          this.logger.debug(
+            `User ${telegramId} stopped typing 5+ seconds ago, proceeding`,
+          );
+          return true;
+        } else {
+          // Еще не прошло 5 секунд, ждем
+          const remainingMs = 5000 - timeSinceLastTyping;
+          this.logger.debug(
+            `User ${telegramId} stopped typing, waiting ${Math.ceil(remainingMs / 1000)}s more...`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+    }
+
+    // Timeout - слишком долго ждали
+    this.logger.warn(
+      `Timeout waiting for user ${telegramId} to stop typing (${maxWaitMs}ms exceeded)`,
+    );
+    return false;
+  }
+
+  /**
+   * Формирует ключ для typing status
+   */
+  private getTypingKey(telegramId: bigint): string {
+    return `typing_status:user:${telegramId}`;
+  }
+
+  /**
    * Закрывает соединение с Redis при остановке приложения
    */
   async onModuleDestroy() {

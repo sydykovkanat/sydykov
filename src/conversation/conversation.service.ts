@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { getUserContext } from '../config/user-contexts.config';
 import { PrismaService } from '../database/prisma.service';
 import { ChatMessage, OpenAIService } from '../openai/openai.service';
 
@@ -39,16 +40,20 @@ export class ConversationService {
     });
 
     if (!user) {
+      // Получаем персональный контекст из конфига (если есть)
+      const customContext = getUserContext(telegramId);
+
       user = await this.prisma.user.create({
         data: {
           telegramId,
           username,
           firstName,
           lastName,
+          customContext,
         },
       });
       this.logger.log(
-        `Created new user: ${user.id} (Telegram ID: ${telegramId})`,
+        `Created new user: ${user.id} (Telegram ID: ${telegramId})${customContext ? ' with custom context' : ''}`,
       );
     }
 
@@ -266,6 +271,7 @@ export class ConversationService {
     delaySeconds: number,
     imageUrls: string[] = [],
     imageBase64?: string,
+    isOwnerMessage: boolean = false,
   ) {
     const scheduledFor = new Date(Date.now() + delaySeconds * 1000);
 
@@ -278,6 +284,7 @@ export class ConversationService {
         scheduledFor,
         imageUrls,
         imageBase64,
+        isOwnerMessage,
       },
     });
   }
@@ -289,6 +296,19 @@ export class ConversationService {
     return await this.prisma.pendingMessage.findMany({
       where: {
         userId,
+        processed: false,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  /**
+   * Найти pending сообщения по telegramId (для отмены автоответа)
+   */
+  async findPendingMessagesByTelegramId(telegramId: bigint) {
+    return await this.prisma.pendingMessage.findMany({
+      where: {
+        telegramId,
         processed: false,
       },
       orderBy: { createdAt: 'asc' },
@@ -333,5 +353,14 @@ export class ConversationService {
     });
 
     return conversation?.isIgnored ?? false;
+  }
+
+  /**
+   * Получает пользователя по ID
+   */
+  async getUserById(userId: string) {
+    return await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
   }
 }

@@ -17,6 +17,7 @@ model User {
   username      String?
   firstName     String?
   lastName      String?
+  customContext String?        @db.Text // Персональный контекст для общения (например, "это мой руководитель")
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   conversations Conversation[]
@@ -67,6 +68,7 @@ model PendingMessage {
   imageUrls         String[] @default([]) // URL картинок в сообщении (deprecated)
   imageBase64       String?  @db.Text // Base64 изображение для GPT Vision (только первое фото)
   telegramMessageId Int // ID сообщения в Telegram
+  isOwnerMessage    Boolean  @default(false) // true если сообщение от владельца с botName (для AI контекста)
   scheduledFor      DateTime // Когда нужно обработать (now + 10 секунд)
   processed         Boolean  @default(false)
   createdAt         DateTime @default(now())

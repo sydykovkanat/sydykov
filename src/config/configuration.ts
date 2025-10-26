@@ -47,6 +47,15 @@ export class EnvironmentVariables {
   @IsOptional()
   TELEGRAM_PHONE_NUMBER?: string;
 
+  // Bot Owner
+  @IsString()
+  @IsOptional()
+  BOT_NAME?: string = 'канатик';
+
+  @IsString()
+  @IsOptional()
+  OWNER_TELEGRAM_ID?: string;
+
   // OpenAI
   @IsString()
   @IsNotEmpty()
@@ -98,7 +107,7 @@ export class EnvironmentVariables {
   @IsPositive()
   @Min(5)
   @Max(100)
-  CONTEXT_MESSAGES_LIMIT: number = 20;
+  CONTEXT_MESSAGES_LIMIT: number = 10;
 
   @IsInt()
   @IsPositive()
@@ -149,10 +158,14 @@ export default () => ({
     sessionString: process.env.TELEGRAM_SESSION_STRING,
     phoneNumber: process.env.TELEGRAM_PHONE_NUMBER,
   },
+  bot: {
+    name: process.env.BOT_NAME || 'канатик',
+    ownerTelegramId: process.env.OWNER_TELEGRAM_ID,
+  },
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '1000', 10),
+    maxTokens: parseInt(process.env.OPENAI_MAX_TOKENS || '300', 10),
   },
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -166,7 +179,7 @@ export default () => ({
   messageProcessing: {
     delaySeconds: parseInt(process.env.MESSAGE_DELAY_SECONDS || '10', 10),
     contextMessagesLimit: parseInt(
-      process.env.CONTEXT_MESSAGES_LIMIT || '20',
+      process.env.CONTEXT_MESSAGES_LIMIT || '10',
       10,
     ),
     summaryThreshold: parseInt(process.env.SUMMARY_THRESHOLD || '50', 10),
