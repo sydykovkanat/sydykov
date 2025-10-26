@@ -640,9 +640,11 @@ export class TelegramService implements OnModuleInit {
     text: string,
   ): Promise<void> {
     try {
-      // Используем высокоуровневый метод editMessage вместо invoke
-      // Он автоматически обрабатывает резолюцию entity
-      await this.client.editMessage(telegramId, {
+      // Получаем entity чата перед редактированием
+      // Это обязательно для того чтобы клиент мог редактировать сообщения
+      const entity = await this.client.getEntity(telegramId);
+
+      await this.client.editMessage(entity, {
         message: messageId,
         text: text,
       });
