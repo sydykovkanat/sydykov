@@ -80,12 +80,20 @@ pm2 startup
 
 3. **VPS_SSH_KEY**
    - Значение: приватный SSH ключ для доступа к VPS
+   - **ВАЖНО**: Ключ берется с **локальной машины**, НЕ с VPS!
    - Как получить:
+
      ```bash
-     # На локальной машине
+     # На локальной машине (твой Mac/PC)
      cat ~/.ssh/id_rsa
+
+     # Если ключа нет, создай:
+     ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+     # Нажимай Enter на все вопросы
      ```
+
    - Скопируй весь ключ включая `-----BEGIN OPENSSH PRIVATE KEY-----` и `-----END OPENSSH PRIVATE KEY-----`
+   - Это приватный ключ - держи его в секрете!
 
 #### Опциональные:
 
@@ -95,17 +103,46 @@ pm2 startup
 
 ### 3. Настройка SSH ключей (если еще не настроено)
 
-На локальной машине:
+**На локальной машине (твой Mac/PC):**
 
 ```bash
-# Сгенерируй SSH ключ если его нет
+# 1. Проверь есть ли SSH ключ
+ls ~/.ssh/id_rsa
+
+# 2. Если нет - создай новый ключ
 ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+# Просто нажимай Enter на все вопросы (или задай passphrase для безопасности)
 
-# Скопируй публичный ключ на VPS
-ssh-copy-id username@vps-host
+# 3. Скопируй публичный ключ на VPS
+ssh-copy-id root@your-vps-ip
+# Введи пароль от VPS (последний раз!)
 
-# Проверь подключение
-ssh username@vps-host
+# 4. Проверь подключение без пароля
+ssh root@your-vps-ip
+# Должно подключиться автоматически!
+```
+
+**Альтернативный способ (если ssh-copy-id не работает):**
+
+```bash
+# На локальной машине - выведи публичный ключ
+cat ~/.ssh/id_rsa.pub
+
+# Подключись к VPS по паролю
+ssh root@your-vps-ip
+
+# На VPS - добавь публичный ключ
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+nano ~/.ssh/authorized_keys
+# Вставь публичный ключ (из id_rsa.pub) на новую строку
+# Сохрани: Ctrl+O, Enter, Ctrl+X
+
+chmod 600 ~/.ssh/authorized_keys
+exit
+
+# Проверь подключение без пароля
+ssh root@your-vps-ip
 ```
 
 ---
